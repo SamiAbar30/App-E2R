@@ -1,0 +1,233 @@
+import { Request, Response, NextFunction } from 'express';
+import { v4 as uuidv4 } from 'uuid';
+import {
+  AnalyzeRequest,
+  AnalyzeResponseData,
+  ApiEnvelope,
+  AnalyzeState,
+  OcrUnavailableError,
+  GraphicalElement,
+  ComplexTermMapping
+} from '../types';
+import { GcpVisionAdapter, IOcrProvider } from '../services/ocrAdapter.service';
+import { MockOcrAdapter } from '../services/mockOcrAdapter.service';
+import { TesseractOcrAdapter } from '../services/tesseractOcrAdapter.service';
+import { env } from '../config/env';
+import { FacileParallelOrchestrator, FacileTimeoutError } from '../services/facileOrchestrator.service';
+import { parseIngredientText } from '../parsers/DataParser';
+import { detectAllergens, detectAllergensFromIngredients } from '../services/allergenDetector';
+import { UserScan } from '../models/UserScan';
+import { ApiLog } from '../models/ApiLog';
+
+interface ScanDocument {
+  userId: string;
+  deviceOS: 'iOS' | 'Android';
+  originalText: string;
+  adaptedText: string;
+  allergens: string[];
+  graphicalElements: GraphicalElement[];
+  complexTermMappings: ComplexTermMapping[];
+  processingMs: number;
+  facileStatus: 'full' | 'partial' | 'failed';
+}
+
+const scanRepository = {
+  create: (scanDocument: ScanDocument) => UserScan.create(scanDocument)
+};
+
+export async function analyzeHandler(req: Request, res: Response, next: NextFunction): Promise<void> {
+  const startTime = Date.now();
+  let state: AnalyzeState = 'RECEIVED';
+  const scanId = uuidv4();
+
+  console.log(`\n[Analyze API] Received scan request (ID: ${scanId})`);
+
+  try {
+    const payload = req.body as Partial<AnalyzeRequest>;
+    if (!payload.userId || !payload.deviceOS || !payload.imagePayload || !payload.timestamp) {
+      res.status(400).json({
+        status: 'error',
+        errorCode: 'INVALID_REQUEST',
+        message: 'Missing required fields: userId, deviceOS, imagePayload, timestamp'
+      });
+      return;
+    }
+
+    const { userId, deviceOS, imagePayload } = payload as AnalyzeRequest;
+    state = 'VALIDATED';
+
+    state = 'OCR_EXEC';
+    let ocrProvider: IOcrProvider;
+    try {
+      if (env.OCR_PROVIDER === 'mock') {
+        console.log(`[Analyze API - ${scanId}] Initializing Mock OCR Adapter...`);
+        ocrProvider = new MockOcrAdapter();
+      } else if (env.OCR_PROVIDER === 'tesseract') {
+        console.log(`[Analyze API - ${scanId}] Initializing Tesseract OCR Adapter...`);
+        ocrProvider = new TesseractOcrAdapter();
+      } else {
+        console.log(`[Analyze API - ${scanId}] Initializing GCP Vision OCR Adapter...`);
+        ocrProvider = new GcpVisionAdapter();
+      }
+    } catch (error) {
+      console.error(`[Analyze API - ${scanId}] OCR Provider Error:`, error);
+      throw new OcrUnavailableError((error as Error).message);
+    }
+    console.log(`[Analyze API - ${scanId}] Executing OCR extraction...`);
+    const ocrResult = await ocrProvider.extract(imagePayload);
+    console.log(`[Analyze API - ${scanId}] OCR Success. Extracted ${ocrResult.rawText.length} characters with confidence ${ocrResult.confidence.toFixed(2)}.`);
+    console.log(`\n=================== OCR EXTRACTED TEXT ===================\n${ocrResult.rawText}\n==========================================================\n`);
+    const rawText = ocrResult.rawText;
+    state = 'OCR_DONE';
+
+    console.log(`[Analyze API - ${scanId}] Sending text to FACILE NLP adapter...`);
+
+    state = 'ADAPT_EXEC';
+    const facileOrchestrator = new FacileParallelOrchestrator();
+    let facileResult;
+    try {
+      facileResult = await facileOrchestrator.adapt(rawText);
+      console.log(`[Analyze API - ${scanId}] FACILE Success. Status: ${facileResult.status}. Found ${facileResult.violations.length} violations.`);
+      state = 'ADAPTED';
+    } catch (error) {
+      console.warn(`[Analyze API - ${scanId}] FACILE Failed or Timed Out. Falling back to un-adapted text.`, (error as Error).message);
+      // Graceful degradation for any FACILE error (503, timeout, etc.)
+      const parsedData = await parseIngredientText(rawText);
+      const textAllergens = detectAllergens(rawText);
+      const parsedAllergens = detectAllergensFromIngredients(parsedData.ingredients);
+      const allAllergens = Array.from(new Set([...textAllergens, ...parsedAllergens]));
+      const processingMs = Date.now() - startTime;
+
+      const responseData: AnalyzeResponseData = {
+        scanId,
+        originalText: rawText,
+        adaptedText: rawText,
+        allergens: allAllergens,
+        graphicalElements: parsedData.graphicalElements,
+        complexTermMappings: parsedData.complexTermMappings,
+        processingMs
+      };
+
+      const envelope: ApiEnvelope<AnalyzeResponseData> = {
+        status: 'partial',
+        data: responseData,
+        code: 'UPM_DEGRADED',
+        message: 'FACILE service error: returning un-adapted text'
+      };
+
+      res.status(207).json(envelope);
+
+      const scanDocument: ScanDocument = {
+        userId,
+        deviceOS,
+        originalText: rawText,
+        adaptedText: rawText,
+        allergens: allAllergens,
+        graphicalElements: parsedData.graphicalElements,
+        complexTermMappings: parsedData.complexTermMappings,
+        processingMs,
+        facileStatus: 'failed'
+      };
+
+      void scanRepository.create(scanDocument).catch(err => {
+        console.error('[DB Save Error] UserScan:', err);
+      });
+
+      void ApiLog.create({
+        endpoint: '/api/v1/ingredients/analyze',
+        method: 'POST',
+        userId,
+        statusCode: 207,
+        responseCode: envelope.code,
+        latencyMs: processingMs,
+        requestSize: imagePayload.length,
+        state: 'ADAPT_EXEC'
+      }).catch(err => console.error('[DB Save Error] ApiLog:', err));
+
+      return;
+    }
+
+    const parsedData = await parseIngredientText(facileResult.adaptedText);
+    const textAllergens = detectAllergens(rawText);
+    const parsedAllergens = detectAllergensFromIngredients(parsedData.ingredients);
+    const allAllergens = Array.from(new Set([...textAllergens, ...parsedAllergens]));
+    const allMappings = [
+      ...facileResult.complexTermMappings,
+      ...parsedData.complexTermMappings
+    ];
+
+    state = 'PARSED';
+    const processingMs = Date.now() - startTime;
+    state = 'DONE';
+
+    console.log(`[Analyze API - ${scanId}] Processing complete in ${processingMs}ms.`);
+    console.log(`[Analyze API - ${scanId}] Detected ${allAllergens.length} allergens and mapped ${allMappings.length} complex terms.`);
+
+    const responseData: AnalyzeResponseData = {
+      scanId,
+      originalText: rawText,
+      adaptedText: facileResult.adaptedText,
+      allergens: allAllergens,
+      graphicalElements: parsedData.graphicalElements,
+      complexTermMappings: allMappings,
+      processingMs
+    };
+
+    const envelope: ApiEnvelope<AnalyzeResponseData> = {
+      status: facileResult.status === 'full' ? 'success' : 'partial',
+      data: responseData,
+      code: facileResult.status === 'full' ? 'SUCCESS' : 'UPM_DEGRADED'
+    };
+
+    res.status(200).json(envelope);
+
+    const scanDocument: ScanDocument = {
+      userId,
+      deviceOS,
+      originalText: rawText,
+      adaptedText: facileResult.adaptedText,
+      allergens: allAllergens,
+      graphicalElements: parsedData.graphicalElements,
+      complexTermMappings: allMappings,
+      processingMs,
+      facileStatus: facileResult.status
+    };
+
+    void scanRepository.create(scanDocument).catch(err => {
+      console.error('[DB Save Error] UserScan:', err);
+    });
+
+    void ApiLog.create({
+      endpoint: '/api/v1/ingredients/analyze',
+      method: 'POST',
+      userId,
+      statusCode: 200,
+      responseCode: envelope.code,
+      latencyMs: processingMs,
+      requestSize: imagePayload.length,
+      state: 'DONE'
+    }).catch(err => console.error('[DB Save Error] ApiLog:', err));
+  } catch (error) {
+    if (error instanceof OcrUnavailableError) {
+      console.error(`[Analyze API - ${scanId}] Returning 503 OCR_UNAVAILABLE to client.`);
+      res.status(503).json({
+        status: 'error',
+        errorCode: 'OCR_UNAVAILABLE',
+        message: 'OCR service unavailable'
+      });
+      return;
+    }
+
+    void ApiLog.create({
+      endpoint: '/api/v1/ingredients/analyze',
+      method: 'POST',
+      statusCode: 500,
+      responseCode: 'INTERNAL_ERROR',
+      latencyMs: Date.now() - startTime,
+      errorMessage: (error as Error).message,
+      state
+    }).catch(() => {});
+
+    next(error as Error);
+  }
+}
