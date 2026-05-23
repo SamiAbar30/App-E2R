@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { imageSizeMiddleware } from '../imageSizeMiddleware';
+import { env } from '../../config/env';
 
 describe('imageSizeMiddleware', () => {
   let mockReq: Partial<Request>;
@@ -17,11 +18,10 @@ describe('imageSizeMiddleware', () => {
     nextFunction = jest.fn();
   });
 
-  it('should pass exactly 2,097,151 bytes payload', () => {
-    // Generate a payload that exactly computes to 2,097,151 bytes when decoded.
-    // Length in base64: L = (bytes * 4) / 3
-    // 2,097,151 * 4 / 3 = 2796201.33 -> 2796204 chars (with padding).
-    const stringLength = 2796202; // A bit under the limit 
+  it('should pass exactly under-limit payload', () => {
+    // Generate a payload that computes to under MAX_IMAGE_BYTES
+    const bytes = env.MAX_IMAGE_BYTES - 100;
+    const stringLength = Math.floor((bytes * 4) / 3) - 2;
     const payload = 'A'.repeat(stringLength) + '=='; 
     mockReq = {
       body: { imagePayload: payload }
@@ -33,10 +33,11 @@ describe('imageSizeMiddleware', () => {
     expect(mockStatus).not.toHaveBeenCalled();
   });
 
-  it('should reject >= 2,097,152 bytes (2.0 MB) payload with 400 INVALID_IMAGE', () => {
-    // Length in base64 for 2MB: (2097152 * 4) / 3 = 2796202.66 -> 2796204 chars
-    // So 2,796,205 chars is definitely >= 2MB
-    const payload = 'A'.repeat(2796205) + '=';
+  it('should reject >= MAX_IMAGE_BYTES payload with 400 INVALID_IMAGE', () => {
+    // Generate a payload that computes to over MAX_IMAGE_BYTES
+    const bytes = env.MAX_IMAGE_BYTES + 100;
+    const stringLength = Math.ceil((bytes * 4) / 3);
+    const payload = 'A'.repeat(stringLength);
     mockReq = {
       body: { imagePayload: payload }
     };

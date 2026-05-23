@@ -30,9 +30,21 @@ interface EnvConfig {
   /** Google Cloud Vision API key. Empty string when using mock OCR. */
   GCP_VISION_KEY: string;
   /** Active OCR provider. Default: 'mock'. */
-  OCR_PROVIDER: 'gcp' | 'mock' | 'tesseract';
+  OCR_PROVIDER: 'gcp' | 'mock' | 'tesseract' | 'paddle' | 'openrouter' | 'nvidia';
+  /** PaddleOCR sidecar microservice URL. */
+  OCR_SERVICE_URL: string;
+  /** Google Cloud Vision API endpoint URL. */
+  GCP_VISION_URL: string;
   /** FACILE NLP service base host URL. */
   FACILE_HOST: string;
+  /** OpenRouter API key for Nemotron OCR */
+  OPENROUTER_API_KEY: string;
+  /** OpenRouter model ID to use for OCR. */
+  OPENROUTER_MODEL: string;
+  /** NVIDIA API Key */
+  NVIDIA_API_KEY: string;
+  /** NVIDIA API model ID */
+  NVIDIA_MODEL: string;
   /** FACILE HTTP basic-auth username. */
   FACILE_USER: string;
   /** FACILE HTTP basic-auth password. */
@@ -76,8 +88,20 @@ function loadEnv(): EnvConfig {
     GCP_VISION_KEY: process.env.GCP_VISION_KEY || '',
     OCR_PROVIDER:
       (process.env.OCR_PROVIDER as EnvConfig['OCR_PROVIDER']) || 'mock',
+    OCR_SERVICE_URL:
+      process.env.OCR_SERVICE_URL || '',
+    GCP_VISION_URL:
+      process.env.GCP_VISION_URL || '',
+    OPENROUTER_API_KEY:
+      process.env.OPENROUTER_API_KEY || '',
+    OPENROUTER_MODEL:
+      process.env.OPENROUTER_MODEL || 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free',
+    NVIDIA_API_KEY:
+      process.env.NVIDIA_API_KEY || '',
+    NVIDIA_MODEL:
+      process.env.NVIDIA_MODEL || 'mistralai/mistral-large-3-675b-instruct-2512',
     FACILE_HOST:
-      process.env.FACILE_HOST || 'https://facile-test.linkeddata.es',
+      process.env.FACILE_HOST || '',
     FACILE_USER: process.env.FACILE_USER || '',
     FACILE_PASS: process.env.FACILE_PASS || '',
     FACILE_IDENTIFY_PORT: parseInt(

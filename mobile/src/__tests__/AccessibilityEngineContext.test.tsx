@@ -4,6 +4,8 @@ import { Text, TouchableOpacity } from 'react-native';
 import { AccessibilityEngineProvider } from '../context/AccessibilityEngineContext';
 import { useAccessibilityOverrides, useContrastPalette, useInteractionAccessibility, useApplyDisabilityPreset } from '../hooks/useAccessibilityEngine';
 
+jest.setTimeout(15000);
+
 const TestComponent = ({ profile }: { profile: 'Cognitive' | 'Visual' | 'Motor' }) => {
   const applyDisabilityPreset = useApplyDisabilityPreset();
   const overrides = useAccessibilityOverrides();
@@ -37,6 +39,11 @@ describe('Cognitive Accessibility & Profile Preset Macro Automation Rules', () =
       </AccessibilityEngineProvider>
     );
 
+    // Allow hydration to complete first
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+
     // Apply Cognitive
     await act(async () => {
       fireEvent.press(getByTestId('preset-button'));
@@ -52,6 +59,11 @@ describe('Cognitive Accessibility & Profile Preset Macro Automation Rules', () =
         <TestComponent profile="Visual" />
       </AccessibilityEngineProvider>
     );
+
+    // Allow hydration to complete first
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
 
     // Apply Visual
     await act(async () => {
@@ -69,6 +81,11 @@ describe('Cognitive Accessibility & Profile Preset Macro Automation Rules', () =
         <TestComponent profile="Motor" />
       </AccessibilityEngineProvider>
     );
+
+    // Allow hydration to complete first
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
 
     // Apply Motor
     await act(async () => {

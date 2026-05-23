@@ -50,7 +50,11 @@ export class GcpVisionAdapter implements IOcrProvider {
     if (!this.apiKey) {
       throw new Error('GCP_VISION_KEY is required for GcpVisionAdapter');
     }
-    this.endpoint = `https://vision.googleapis.com/v1/images:annotate?key=${this.apiKey}`;
+    const baseUrl = env.GCP_VISION_URL;
+    if (!baseUrl) {
+      throw new Error('GCP_VISION_URL is required for GcpVisionAdapter');
+    }
+    this.endpoint = `${baseUrl}?key=${this.apiKey}`;
   }
 
   async extract(base64: string): Promise<OcrResult> {

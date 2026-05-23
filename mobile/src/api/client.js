@@ -1,7 +1,27 @@
-import { Platform } from 'react-native';
+import { Platform, NativeModules } from 'react-native';
 
-const API_URL = process.env.API_BASE_URL; // Real backend URL (update with local IP from ipconfig if it changes)
-const USE_MOCK_API = false; // Set to true for offline presentation mode
+const getApiUrl = () => {
+  if (process.env.EXPO_PUBLIC_API_URL) {
+    return process.env.EXPO_PUBLIC_API_URL;
+  }
+
+  // If you are on an Android emulator, 10.0.2.2 points to your PC's localhost.
+  // If you are on an iOS simulator, localhost works out of the box.
+  // If you are on a physical phone, you MUST run `adb reverse tcp:3000 tcp:3000`
+  // for localhost to work!
+  return Platform.OS === 'android' ? 'http://10.0.2.2:3000/api' : 'http://localhost:3000/api';
+};
+
+const API_URL = getApiUrl();
+console.log('\n\n======================================');
+console.log('API_URL RESOLVED TO:', API_URL);
+console.log('SCRIPT_URL WAS:', NativeModules.SourceCode?.scriptURL);
+console.log('======================================\n\n');
+
+if (!API_URL) {
+  console.warn('Warning: API_URL could not be determined.');
+}
+const USE_MOCK_API = process.env.EXPO_PUBLIC_USE_MOCK_API === 'true';
 
 // Rotating mock cases for presentation
 let mockCaseCounter = 0;
@@ -54,6 +74,7 @@ const MOCK_CASES = [
 ];
 
 export const uploadLabelImage = async (imageUri, imageBase64) => {
+  console.log('uploadLabelImage called');
   if (USE_MOCK_API) {
     // 1. Prepare connection (simulate network delay)
     await new Promise(resolve => setTimeout(resolve, 1500));
@@ -77,14 +98,15 @@ export const uploadLabelImage = async (imageUri, imageBase64) => {
   };
 
   try {
+    console.log('uploadLabelImage payload:', payload);
     const response = await fetch(`${API_URL}/v1/ingredients/analyze`, {
       method: 'POST',
       body: JSON.stringify(payload),
       headers: {
         'Content-Type': 'application/json',
         'Accept': 'application/json',
-        // Dummy dev JWT
-        'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiJ0ZXN0LXVzZXIiLCJpYXQiOjE3NzkzNzYwNjQsImV4cCI6NDkzNTEzNjA2NH0.5yPmXXnuSGnIWB22jYrdKN2-V90jxNzwXA1wyY45aws'
+        // Environment-driven development/local JWT
+        'Authorization': `Bearer ${process.env.EXPO_PUBLIC_DEV_JWT || ''}`
       },
     });
 

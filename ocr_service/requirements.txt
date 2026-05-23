@@ -1,0 +1,11 @@
+# PaddleOCR FastAPI Microservice — Python dependencies
+# Pinned to stable versions compatible with PaddlePaddle 3.x / PP-OCRv5
+
+paddlepaddle==3.0.0
+paddleocr>=2.9.0
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+pydantic>=2.9.0
+numpy>=1.26.0
+opencv-python-headless>=4.10.0
+Pillow>=10.4.0

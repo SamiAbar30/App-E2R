@@ -1,3 +1,6 @@
+import dotenv from 'dotenv';
+dotenv.config();
+
 import nock from 'nock';
 import { FacileParallelOrchestrator } from '../../facileOrchestrator.service';
 import { env } from '../../../config/env';

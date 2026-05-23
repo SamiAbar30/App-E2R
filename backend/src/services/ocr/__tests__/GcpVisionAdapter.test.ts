@@ -1,10 +1,20 @@
+import dotenv from 'dotenv';
+dotenv.config();
+
 import nock from 'nock';
 import { GcpVisionAdapter } from '../../ocrAdapter.service';
 import { OcrUnavailableError } from '../../../types';
 
+const defaultUrl = 'http://localhost/v1/images:annotate';
+const fullUrl = process.env.GCP_VISION_URL || defaultUrl;
+const parsedUrl = new URL(fullUrl);
+const mockOrigin = parsedUrl.origin;
+const mockPath = parsedUrl.pathname;
+
 jest.mock('../../../config/env', () => ({
   env: {
-    GCP_VISION_KEY: 'test-key'
+    GCP_VISION_KEY: 'test-key',
+    GCP_VISION_URL: process.env.GCP_VISION_URL || 'http://localhost/v1/images:annotate'
   }
 }));
 
@@ -30,8 +40,8 @@ describe('GcpVisionAdapter (COMP-002 Pluggable Adapter)', () => {
   });
 
   it('should return rawText correctly on successful OCR', async () => {
-    nock('https://vision.googleapis.com')
-      .post('/v1/images:annotate?key=test-key')
+    nock(mockOrigin)
+      .post(`${mockPath}?key=test-key`)
       .reply(200, {
         responses: [
           {
@@ -51,8 +61,8 @@ describe('GcpVisionAdapter (COMP-002 Pluggable Adapter)', () => {
     const setTimeoutSpy = jest.spyOn(global, 'setTimeout');
 
     // Nock will return 503 exactly 3 times (initial + 2 retries)
-    nock('https://vision.googleapis.com')
-      .post('/v1/images:annotate?key=test-key')
+    nock(mockOrigin)
+      .post(`${mockPath}?key=test-key`)
       .times(3)
       .reply(503, 'Service Unavailable');
 

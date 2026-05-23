@@ -66,6 +66,7 @@ export function CameraScanScreen({ navigation }: { navigation: NavigationProp })
     
     setProcessing(true);
     try {
+      console.log('Analyzing image...');
       const data = await uploadLabelImage(imageUri, imageBase64);
       setResult(data as any);
       navigation.navigate('Result');

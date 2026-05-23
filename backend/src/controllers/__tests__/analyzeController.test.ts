@@ -1,3 +1,6 @@
+import dotenv from 'dotenv';
+dotenv.config();
+
 import request from 'supertest';
 import express from 'express';
 import nock from 'nock';
@@ -40,6 +43,12 @@ jest.mock('../../services/mockOcrAdapter.service', () => ({
 
 jest.mock('../../services/tesseractOcrAdapter.service', () => ({
   TesseractOcrAdapter: jest.fn().mockImplementation(() => ({
+    extract: jest.fn().mockResolvedValue(mockOcrResult)
+  }))
+}));
+
+jest.mock('../../services/paddleOcrAdapter.service', () => ({
+  PaddleOcrAdapter: jest.fn().mockImplementation(() => ({
     extract: jest.fn().mockResolvedValue(mockOcrResult)
   }))
 }));

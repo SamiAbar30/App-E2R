@@ -12,6 +12,9 @@ import {
 import { GcpVisionAdapter, IOcrProvider } from '../services/ocrAdapter.service';
 import { MockOcrAdapter } from '../services/mockOcrAdapter.service';
 import { TesseractOcrAdapter } from '../services/tesseractOcrAdapter.service';
+import { PaddleOcrAdapter } from '../services/paddleOcrAdapter.service';
+import { OpenRouterOcrAdapter } from '../services/openRouterOcrAdapter.service';
+import { NvidiaOcrAdapter } from '../services/nvidiaOcrAdapter.service';
 import { env } from '../config/env';
 import { FacileParallelOrchestrator, FacileTimeoutError } from '../services/facileOrchestrator.service';
 import { parseIngredientText } from '../parsers/DataParser';
@@ -65,6 +68,15 @@ export async function analyzeHandler(req: Request, res: Response, next: NextFunc
       } else if (env.OCR_PROVIDER === 'tesseract') {
         console.log(`[Analyze API - ${scanId}] Initializing Tesseract OCR Adapter...`);
         ocrProvider = new TesseractOcrAdapter();
+      } else if (env.OCR_PROVIDER === 'paddle') {
+        console.log(`[Analyze API - ${scanId}] Initializing PaddleOCR Sidecar Adapter...`);
+        ocrProvider = new PaddleOcrAdapter();
+      } else if (env.OCR_PROVIDER === 'openrouter') {
+        console.log(`[Analyze API - ${scanId}] Initializing OpenRouter OCR Adapter...`);
+        ocrProvider = new OpenRouterOcrAdapter();
+      } else if (env.OCR_PROVIDER === 'nvidia') {
+        console.log(`[Analyze API - ${scanId}] Initializing NVIDIA API OCR Adapter...`);
+        ocrProvider = new NvidiaOcrAdapter();
       } else {
         console.log(`[Analyze API - ${scanId}] Initializing GCP Vision OCR Adapter...`);
         ocrProvider = new GcpVisionAdapter();
