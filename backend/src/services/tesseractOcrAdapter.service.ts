@@ -22,44 +22,71 @@ export class TesseractOcrAdapter implements IOcrProvider {
     const payload = base64.includes(',') ? base64.split(',')[1] : base64;
     const rawBuffer = Buffer.from(payload, 'base64');
 
-    // 2. Run image preprocessing pipeline (grayscale, sharpen, normalise, negate, threshold)
-    const buffer = await OcrImagePreprocessor.processForOcr(rawBuffer);
+    // 2. Generate multiple preprocessed variants for A/B testing
+    const variants = await OcrImagePreprocessor.processForOcrVariants(rawBuffer);
 
     let worker: any = null;
     try {
       console.log('[Tesseract OCR] Initializing local worker (Spanish + English)...');
-      
-      // Initialize the worker with Spanish (primary) and English (secondary) training data.
       worker = await createWorker('spa+eng');
+      
+      // 3. Engine Tuning: Optimize for sparse text (labels) and disable dictionaries 
+      // to prevent hallucinating words out of chemicals/numbers.
+      await worker.setParameters({
+        tessedit_pageseg_mode: '11',
+        load_system_dawg: '0',
+        load_freq_dawg: '0'
+      });
 
-      console.log('[Tesseract OCR] Running local text recognition...');
-      const { data } = await worker.recognize(buffer);
-      const text = data.text;
-      const confidence = data.confidence; // 0 to 100
+      console.log('[Tesseract OCR] Running dynamic A/B extraction...');
+      
+      let bestResult: OcrResult | null = null;
+      let highestConfidence = -1;
 
-      if (!text || !text.trim()) {
-        throw new Error('No text was recognized in the image.');
+      // 4. Test each variant sequentially
+      for (const variant of variants) {
+        console.log(`[Tesseract OCR] Testing variant: ${variant.name}...`);
+        const { data } = await worker.recognize(variant.buffer);
+        const text = data.text;
+        const confidence = data.confidence; // 0 to 100
+
+        if (!text || !text.trim()) {
+          console.log(`[Tesseract OCR] Variant ${variant.name} yielded no text.`);
+          continue;
+        }
+
+        // Clean and normalize the raw text
+        const rawText = text.replace(/[\x00-\x1F\x7F]/g, ' ').replace(/\s+/g, ' ').trim();
+        const lines = text
+          .split(/\r?\n/)
+          .map((line: string) => line.replace(/[\x00-\x1F\x7F]/g, ' ').replace(/\s+/g, ' ').trim())
+          .filter((line: string) => line.length > 0);
+
+        // Normalize tesseract confidence (0-100) to standard 0-1 scale
+        const normalizedConfidence = (confidence ?? 0) / 100;
+
+        if (normalizedConfidence > highestConfidence) {
+          highestConfidence = normalizedConfidence;
+          bestResult = {
+            rawText,
+            confidence: normalizedConfidence,
+            lines
+          };
+        }
+
+        // Early Exit: if confidence is excellent, skip processing remaining variants
+        if (normalizedConfidence >= 0.80) {
+          console.log(`[Tesseract OCR] Early exit triggered on ${variant.name} (Confidence: ${normalizedConfidence.toFixed(2)})`);
+          break;
+        }
       }
 
-      // 2. Clean and normalize the raw text
-      const rawText = text.replace(/[\x00-\x1F\x7F]/g, ' ').replace(/\s+/g, ' ').trim();
+      if (!bestResult) {
+        throw new Error('No text was recognized in any of the image variants.');
+      }
 
-      // 3. Extract individual lines
-      const lines = text
-        .split(/\r?\n/)
-        .map((line: string) => line.replace(/[\x00-\x1F\x7F]/g, ' ').replace(/\s+/g, ' ').trim())
-        .filter((line: string) => line.length > 0);
-
-      // 4. Normalize tesseract confidence (0-100) to standard 0-1 scale
-      const normalizedConfidence = (confidence ?? 0) / 100;
-
-      console.log(`[Tesseract OCR] Successful extraction. Confidence: ${normalizedConfidence.toFixed(2)}`);
-
-      return {
-        rawText,
-        confidence: normalizedConfidence,
-        lines
-      };
+      console.log(`[Tesseract OCR] Successful extraction. Final Confidence: ${bestResult.confidence.toFixed(2)}`);
+      return bestResult;
     } catch (error: any) {
       console.error('[Tesseract OCR Error] Extraction failed:', error.message);
       throw new OcrUnavailableError(`Tesseract OCR processing failed: ${error.message}`);
