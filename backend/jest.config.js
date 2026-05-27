@@ -3,6 +3,7 @@ module.exports = {
   preset: 'ts-jest',
   testEnvironment: 'node',
   testMatch: ['**/__tests__/**/*.test.ts'],
+  modulePathIgnorePatterns: ['<rootDir>/dist/'],
   collectCoverage: true,
   coverageDirectory: 'coverage',
   collectCoverageFrom: [
@@ -21,6 +22,7 @@ module.exports = {
     }
   },
   moduleNameMapper: {
-    '^@/(.*)$': '<rootDir>/src/$1'
+    '^@/(.*)$': '<rootDir>/src/$1',
+    '^franc-min$': '<rootDir>/src/parsers/__mocks__/franc-min.ts'
   }
 };

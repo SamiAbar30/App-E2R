@@ -15,7 +15,7 @@ describe('CameraScanScreen', () => {
     expect(getByRole('button', { name: 'Take Photo' })).toBeTruthy();
   });
 
-  it('mocks blurred frame and blocks capture with HOLD STEADY', () => {
+  it('mocks blurred frame and keeps capture available with HOLD STEADY guidance', () => {
     const { getByTestId, getByRole, getByText } = render(
       <AccessibilityEngineProvider>
         <CameraScanScreen navigation={mockNavigation} />
@@ -28,11 +28,10 @@ describe('CameraScanScreen', () => {
     expect(getByText('HOLD STEADY')).toBeTruthy();
     
     const captureBtn = getByRole('button', { name: 'Take Photo' });
-    // Verify it is disabled by checking if it blocks press or checking props
-    expect(captureBtn.props.accessibilityState?.disabled ?? captureBtn.props.disabled).toBe(true);
+    expect(captureBtn.props.accessibilityState?.disabled ?? captureBtn.props.disabled ?? false).toBe(false);
   });
 
-  it('mocks under-exposed frame and blocks capture with MOVE CLOSER', () => {
+  it('mocks under-exposed frame and keeps capture available with MOVE CLOSER guidance', () => {
     const { getByTestId, getByRole, getByText } = render(
       <AccessibilityEngineProvider>
         <CameraScanScreen navigation={mockNavigation} />
@@ -45,6 +44,6 @@ describe('CameraScanScreen', () => {
     expect(getByText('MOVE CLOSER')).toBeTruthy();
     
     const captureBtn = getByRole('button', { name: 'Take Photo' });
-    expect(captureBtn.props.accessibilityState?.disabled ?? captureBtn.props.disabled).toBe(true);
+    expect(captureBtn.props.accessibilityState?.disabled ?? captureBtn.props.disabled ?? false).toBe(false);
   });
 });

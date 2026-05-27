@@ -16,7 +16,7 @@ describe('DataParser (COMP-004 DFA Engine)', () => {
     // 3. Chemical E-number mapping (needs eu-additives.json loaded)
     const res3 = await parseIngredientText('colorante E100');
     // E100 is Curcumina. Our DFA extracts it to complexTermMappings
-    const mapping = res3.complexTermMappings.find(m => m.simplified === 'E100');
+    const mapping = res3.complexTermMappings.find((m: any) => m.simplified === 'E100');
     expect(mapping).toBeDefined();
 
     // 4. Nested parentheses ignoring commas
@@ -39,7 +39,7 @@ describe('DataParser (COMP-004 DFA Engine)', () => {
 
     // 8. E-number with dash/spaces
     const res8 = await parseIngredientText('conservante E-200');
-    expect(res8.complexTermMappings.find(m => m.simplified === 'E200')).toBeDefined();
+    expect(res8.complexTermMappings.find((m: any) => m.simplified === 'E200')).toBeDefined();
 
     // 9. Decimal without leading zero (edge case format)
     const res9 = await parseIngredientText('fibra .5g');

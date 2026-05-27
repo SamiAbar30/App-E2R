@@ -23,6 +23,11 @@ function normalizeOcrText(raw: string): string {
   return withoutControls.replace(/\s+/g, ' ').trim();
 }
 
+function isUnusableOcrText(text: string): boolean {
+  const normalized = text.trim();
+  return !normalized || /^(?:\[\]|\{\}|null|none|no text detected)$/i.test(normalized);
+}
+
 export class OpenRouterOcrAdapter implements IOcrProvider {
   private readonly apiKey: string;
   private readonly endpoint = 'https://openrouter.ai/api/v1/chat/completions';
@@ -138,6 +143,10 @@ export class OpenRouterOcrAdapter implements IOcrProvider {
     }
 
     const normalized = normalizeOcrText(fullText);
+    if (isUnusableOcrText(normalized)) {
+      throw new Error(`OpenRouter returned unusable OCR text: "${normalized}"`);
+    }
+
     const lines = fullText
       .split(/\r?\n/)
       .map(line => normalizeOcrText(line))
@@ -155,6 +164,7 @@ export class OpenRouterOcrAdapter implements IOcrProvider {
     if (error.message.includes('ECONNREFUSED')) return true;
     if (error.message.includes('ECONNRESET')) return true;
     if (error.message.includes('ETIMEDOUT')) return true;
+    if (error.message.includes('unusable OCR text')) return true;
     if (/5\d{2}/.test(error.message)) return true;
     // Rate limits (429) can also be retryable
     if (/429/.test(error.message)) return true;

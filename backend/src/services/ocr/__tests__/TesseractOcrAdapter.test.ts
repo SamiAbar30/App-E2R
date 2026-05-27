@@ -11,7 +11,20 @@ jest.mock('tesseract.js', () => ({
 // not image processing. Pass buffer through unchanged.
 jest.mock('../../ocrPreprocessor.service', () => ({
   OcrImagePreprocessor: {
-    processForOcr: jest.fn().mockImplementation((buf: Buffer) => Promise.resolve(buf))
+    processForOcrVariants: jest.fn().mockImplementation((buf: Buffer) => Promise.resolve([
+      {
+        name: 'Mock_Ingredient',
+        buffer: buf,
+        profileHint: 'ingredient_block',
+        recommendedPsms: ['6'],
+        diagnostics: {
+          hardThreshold: true,
+          inverted: false,
+          cropApplied: false,
+          contrastStrategy: 'mock'
+        }
+      }
+    ]))
   }
 }));
 
@@ -25,11 +38,16 @@ describe('TesseractOcrAdapter (COMP-002 Pluggable Adapter)', () => {
     jest.clearAllMocks();
 
     mockWorker = {
+      setParameters: jest.fn().mockResolvedValue(undefined),
       recognize: jest.fn(),
       terminate: jest.fn().mockResolvedValue(undefined)
     };
 
     (createWorker as jest.Mock).mockResolvedValue(mockWorker);
+  });
+
+  afterEach(async () => {
+    await TesseractOcrAdapter.shutdownWorkerPool();
   });
 
   it('should extract text successfully and normalize confidence/lines', async () => {
@@ -44,8 +62,12 @@ describe('TesseractOcrAdapter (COMP-002 Pluggable Adapter)', () => {
 
     // Assert worker creation and usage
     expect(createWorker).toHaveBeenCalledWith('spa+eng');
+    expect(mockWorker.setParameters).toHaveBeenCalledWith(expect.objectContaining({
+      tessedit_pageseg_mode: '6',
+      user_defined_dpi: '300',
+      preserve_interword_spaces: '1'
+    }));
     expect(mockWorker.recognize).toHaveBeenCalled();
-    expect(mockWorker.terminate).toHaveBeenCalled();
 
     // Assert output normalization
     expect(result.rawText).toBe('Ingredients: Water, Sugar Citric Acid (E330) Peanuts');
@@ -76,8 +98,7 @@ describe('TesseractOcrAdapter (COMP-002 Pluggable Adapter)', () => {
 
     await expect(adapter.extract(mockBase64)).rejects.toThrow(OcrUnavailableError);
 
-    // Verification of worker cleanup to prevent resource leaks
-    expect(mockWorker.terminate).toHaveBeenCalled();
+    expect(mockWorker.setParameters).toHaveBeenCalled();
   });
 
   it('should throw OcrUnavailableError when returning an empty or whitespace-only result', async () => {
@@ -89,6 +110,6 @@ describe('TesseractOcrAdapter (COMP-002 Pluggable Adapter)', () => {
     });
 
     await expect(adapter.extract(mockBase64)).rejects.toThrow(OcrUnavailableError);
-    expect(mockWorker.terminate).toHaveBeenCalled();
+    expect(mockWorker.recognize).toHaveBeenCalled();
   });
 });

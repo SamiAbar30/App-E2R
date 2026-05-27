@@ -1,10 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
+import { evaluateLabelQuality, FrameStats, LabelQualityResult } from '../utils/labelQuality';
+import {
+  GUIDE_ASPECT_RATIO,
+  GUIDE_TOP_OFFSET,
+  GUIDE_WIDTH_RATIO
+} from '../utils/cameraGuideCrop';
 
-export type FrameStats = {
-  laplacianVariance: number;
-  luminance: number;
-};
+export type { FrameStats };
 
 interface Props {
   stats?: FrameStats;
@@ -13,32 +16,29 @@ interface Props {
 }
 
 export function CameraFrameProcessor({ stats, onClearToCapture, fontScale = 1 }: Props) {
-  const [warning, setWarning] = useState<string | null>(null);
+  const [quality, setQuality] = useState<LabelQualityResult>(() => evaluateLabelQuality(stats));
 
   useEffect(() => {
-    if (!stats) {
-      setWarning(null);
-      onClearToCapture(true);
-      return;
-    }
-
-    if (stats.luminance < 0.2) {
-      setWarning('MOVE CLOSER');
-      onClearToCapture(false);
-    } else if (stats.laplacianVariance < 50) {
-      setWarning('HOLD STEADY');
-      onClearToCapture(false);
-    } else {
-      setWarning(null);
-      onClearToCapture(true);
-    }
+    const nextQuality = evaluateLabelQuality(stats);
+    setQuality(nextQuality);
+    onClearToCapture(nextQuality.isClearToCapture);
   }, [stats, onClearToCapture]);
 
-  if (!warning) return null;
-
   return (
-    <View style={styles.container} accessibilityRole="alert">
-      <Text style={[styles.text, { fontSize: 24 * fontScale }]}>{warning}</Text>
+    <View
+      style={[styles.container, { borderColor: quality.borderColor }]}
+      pointerEvents="none"
+      accessibilityRole={quality.isClearToCapture ? 'summary' : 'alert'}
+      accessibilityLabel={quality.message}
+      testID="label-quality-frame"
+    >
+      <View style={[styles.corner, styles.topLeft]} />
+      <View style={[styles.corner, styles.topRight]} />
+      <View style={[styles.corner, styles.bottomLeft]} />
+      <View style={[styles.corner, styles.bottomRight]} />
+      <View style={[styles.statusPill, { backgroundColor: quality.borderColor }]}>
+        <Text style={[styles.text, { fontSize: 18 * fontScale }]}>{quality.message}</Text>
+      </View>
     </View>
   );
 }
@@ -46,16 +46,58 @@ export function CameraFrameProcessor({ stats, onClearToCapture, fontScale = 1 }:
 const styles = StyleSheet.create({
   container: {
     position: 'absolute',
-    top: 40,
+    top: GUIDE_TOP_OFFSET,
     alignSelf: 'center',
-    backgroundColor: '#ef233c', // ACCENT_RED
-    paddingHorizontal: 20,
-    paddingVertical: 10,
+    width: `${GUIDE_WIDTH_RATIO * 100}%`,
+    aspectRatio: GUIDE_ASPECT_RATIO,
+    borderWidth: 4,
     borderRadius: 8,
+    justifyContent: 'flex-start',
+    alignItems: 'center',
     zIndex: 10,
+    backgroundColor: 'rgba(0,0,0,0.03)',
+  },
+  statusPill: {
+    marginTop: -18,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+    minWidth: 160,
+    alignItems: 'center',
   },
   text: {
     color: '#ffffff',
     fontWeight: 'bold',
+    textAlign: 'center',
+  },
+  corner: {
+    position: 'absolute',
+    width: 34,
+    height: 34,
+    borderColor: '#ffffff',
+  },
+  topLeft: {
+    top: 10,
+    left: 10,
+    borderTopWidth: 4,
+    borderLeftWidth: 4,
+  },
+  topRight: {
+    top: 10,
+    right: 10,
+    borderTopWidth: 4,
+    borderRightWidth: 4,
+  },
+  bottomLeft: {
+    bottom: 10,
+    left: 10,
+    borderBottomWidth: 4,
+    borderLeftWidth: 4,
+  },
+  bottomRight: {
+    bottom: 10,
+    right: 10,
+    borderBottomWidth: 4,
+    borderRightWidth: 4,
   }
 });

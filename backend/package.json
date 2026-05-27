@@ -5,17 +5,21 @@
   "main": "dist/server.js",
   "scripts": {
     "build": "tsc",
-    "start": "node dist/server.js",
+    "start": "tsc && node dist/server.js",
     "dev": "tsx watch src/server.ts",
     "test": "jest",
+    "test:unit": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/unit --testMatch \"**/*.test.js\" --coverage=false",
     "lint": "tsc --noEmit",
+    "benchmark:ocr": "tsx scripts/ocr-benchmark.ts",
     "seed": "tsx src/seed.ts"
   },
   "dependencies": {
     "@google-cloud/vision": "^4.3.2",
+    "@techstark/opencv-js": "4.12.0-release.1",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
+    "franc": "^6.2.0",
     "franc-min": "^6.2.0",
     "helmet": "^7.1.0",
     "jsonwebtoken": "^9.0.2",

@@ -16,6 +16,19 @@ jest.mock('expo-speech', () => {
   };
 });
 
+// Mock image cropping used by the scan camera
+jest.mock('expo-image-manipulator', () => {
+  return {
+    SaveFormat: { JPEG: 'jpeg' },
+    manipulateAsync: jest.fn(async (uri, _actions, options) => ({
+      uri,
+      width: 100,
+      height: 100,
+      base64: options?.base64 ? 'mock-cropped-base64' : undefined,
+    })),
+  };
+});
+
 // Mock react-native-mmkv
 jest.mock('react-native-mmkv', () => {
   return {

@@ -7,8 +7,22 @@ import {
 } from '../types';
 import { env } from '../config/env';
 
-const IDENTIFY_TIMEOUT_MS = 800;
-const SUGGEST_TIMEOUT_MS = 800;
+const IDENTIFY_TIMEOUT_MS = Number(process.env.FACILE_IDENTIFY_TIMEOUT_MS || 10000);
+const SUGGEST_TIMEOUT_MS = Number(process.env.FACILE_SUGGEST_TIMEOUT_MS || 15000);
+
+type FacileRawViolation = Partial<FacileViolation> & {
+  guideline?: string;
+  problematicClause?: string;
+  explanation?: string;
+  type?: string;
+};
+
+type FacileRawSuggestion = Partial<FacileSuggestion> & {
+  guideline?: string;
+  problematicClause?: string;
+  guidelines?: Array<{ guideline?: string }>;
+  suggestions?: FacileRawSuggestion[];
+};
 
 export class FacileTimeoutError extends Error {
   constructor(message: string = 'FACILE request timed out') {
@@ -18,8 +32,9 @@ export class FacileTimeoutError extends Error {
 }
 
 export class FacileParallelOrchestrator {
-  private readonly identifyUrl = `${env.FACILE_HOST}:${env.FACILE_IDENTIFY_PORT}/facileRest/identification`;
-  private readonly suggestUrl = `${env.FACILE_HOST}:${env.FACILE_SUGGEST_PORT}/facileRest/suggestion`;
+  private readonly facileHost = env.FACILE_HOST.replace(/\/+$/, '');
+  private readonly identifyUrl = `${this.facileHost}/${env.FACILE_IDENTIFY_PORT}/facileRest/identification`;
+  private readonly suggestUrl = `${this.facileHost}/${env.FACILE_SUGGEST_PORT}/facileRest/suggestion`;
   private readonly authHeader: string;
 
   private readonly targetGuidelines = [
@@ -30,6 +45,60 @@ export class FacileParallelOrchestrator {
 
   constructor() {
     this.authHeader = `Basic ${Buffer.from(`${env.FACILE_USER}:${env.FACILE_PASS}`).toString('base64')}`;
+  }
+
+  private buildPayload(text: string, guidelines: unknown[]) {
+    return {
+      originalText: text,
+      formatInformation: [],
+      guidelines
+    };
+  }
+
+  private normalizeViolation(raw: FacileRawViolation): FacileViolation {
+    const idGuideline = raw.idGuideline || raw.guideline || '';
+    const subtext = raw.subtext || raw.problematicClause || '';
+
+    return {
+      ...raw,
+      idGuideline,
+      subtext,
+      startIndex: Number(raw.startIndex ?? 0),
+      endIndex: Number(raw.endIndex ?? raw.startIndex ?? 0),
+      category: raw.category || idGuideline
+    };
+  }
+
+  private normalizeIdentifyResponse(data: unknown): FacileViolation[] {
+    const rawViolations = Array.isArray(data)
+      ? data
+      : Array.isArray((data as { guidelines?: unknown[] })?.guidelines)
+        ? (data as { guidelines: unknown[] }).guidelines
+        : [];
+
+    return rawViolations.map(raw => this.normalizeViolation(raw as FacileRawViolation));
+  }
+
+  private normalizeSuggestResponse(data: unknown): FacileSuggestion[] {
+    const rawSuggestions = Array.isArray(data)
+      ? data
+      : Array.isArray((data as { suggestions?: unknown[] })?.suggestions)
+        ? (data as { suggestions: unknown[] }).suggestions
+        : [];
+
+    return rawSuggestions.map((raw) => {
+      const suggestion = raw as FacileRawSuggestion;
+      const idGuideline = suggestion.idGuideline || suggestion.guideline || suggestion.guidelines?.[0]?.guideline || '';
+
+      return {
+        ...suggestion,
+        idGuideline,
+        subtext: suggestion.subtext || suggestion.problematicClause || '',
+        startIndex: Number(suggestion.startIndex ?? 0),
+        endIndex: Number(suggestion.endIndex ?? suggestion.startIndex ?? 0),
+        possibleTransformations: suggestion.possibleTransformations || []
+      };
+    });
   }
 
   async adapt(rawText: string): Promise<FacileResult> {
@@ -105,6 +174,10 @@ export class FacileParallelOrchestrator {
   private async identify(text: string): Promise<FacileViolation[]> {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), IDENTIFY_TIMEOUT_MS);
+    const payload = this.buildPayload(text, this.targetGuidelines);
+
+    console.log(`[FACILE API] Outgoing IDENTIFY request to: ${this.identifyUrl}`);
+    console.log(`[FACILE API] IDENTIFY Payload:\n`, JSON.stringify(payload, null, 2));
 
     try {
       const response = await fetch(this.identifyUrl, {
@@ -113,20 +186,21 @@ export class FacileParallelOrchestrator {
           'Authorization': this.authHeader,
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({
-          text,
-          idGuidelines: this.targetGuidelines
-        }),
+        body: JSON.stringify(payload),
         signal: controller.signal
       });
+
+      console.log(`[FACILE API] IDENTIFY Response Status: ${response.status}`);
 
       if (!response.ok) {
         throw new Error(`FACILE identify failed: ${response.status}`);
       }
 
-      const data = await response.json() as FacileViolation[];
-      return Array.isArray(data) ? data : [];
+      const data = await response.json();
+      console.log(`[FACILE API] IDENTIFY Response Data:\n`, JSON.stringify(data, null, 2));
+      return this.normalizeIdentifyResponse(data);
     } catch (error) {
+      console.error(`[FACILE API] IDENTIFY request failed:`, error);
       if ((error as Error).name === 'AbortError') {
         throw new FacileTimeoutError('FACILE identify timed out');
       }
@@ -143,6 +217,10 @@ export class FacileParallelOrchestrator {
     const promises = violations.map(async (violation) => {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), SUGGEST_TIMEOUT_MS);
+      const payload = this.buildPayload(text, [violation]);
+
+      console.log(`[FACILE API] Outgoing SUGGEST request to: ${this.suggestUrl} for violation: ${violation.idGuideline}`);
+      console.log(`[FACILE API] SUGGEST Payload:\n`, JSON.stringify(payload, null, 2));
 
       try {
         const response = await fetch(this.suggestUrl, {
@@ -151,20 +229,21 @@ export class FacileParallelOrchestrator {
             'Authorization': this.authHeader,
             'Content-Type': 'application/json'
           },
-          body: JSON.stringify({
-            text,
-            violations: [violation]
-          }),
+          body: JSON.stringify(payload),
           signal: controller.signal
         });
+
+        console.log(`[FACILE API] SUGGEST Response Status: ${response.status} for violation: ${violation.idGuideline}`);
 
         if (!response.ok) {
           throw new Error(`FACILE suggest failed: ${response.status}`);
         }
 
-        const data = await response.json() as FacileSuggestion[];
-        return Array.isArray(data) ? data : [];
+        const data = await response.json();
+        console.log(`[FACILE API] SUGGEST Response Data for violation ${violation.idGuideline}:\n`, JSON.stringify(data, null, 2));
+        return this.normalizeSuggestResponse(data);
       } catch (error) {
+        console.error(`[FACILE API] SUGGEST request failed for violation ${violation.idGuideline}:`, error);
         if ((error as Error).name === 'AbortError') {
           throw new FacileTimeoutError(`FACILE suggest timed out for ${violation.idGuideline}`);
         }

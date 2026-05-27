@@ -77,15 +77,15 @@ describe('Analyze Controller (COMP-001 State Machine)', () => {
 
   it('should successfully execute full state machine and fire background promises (NFR-PERF-005)', async () => {
     // Mock FACILE identify
-    nock(`${env.FACILE_HOST}:${env.FACILE_IDENTIFY_PORT}`)
-      .post(`/facileRest/identification`)
+    nock(`${env.FACILE_HOST}`)
+      .post(`/${env.FACILE_IDENTIFY_PORT}/facileRest/identification`)
       .reply(200, [
         { idGuideline: 'guideline22Vocab', startIndex: 0, endIndex: 4, subtext: 'test' }
       ]);
 
     // Mock FACILE suggest
-    nock(`${env.FACILE_HOST}:${env.FACILE_SUGGEST_PORT}`)
-      .post(`/facileRest/suggestion`)
+    nock(`${env.FACILE_HOST}`)
+      .post(`/${env.FACILE_SUGGEST_PORT}/facileRest/suggestion`)
       .reply(200, [
         { idGuideline: 'guideline22Vocab', startIndex: 0, endIndex: 4, possibleTransformations: ['fácil'] }
       ]);
@@ -116,8 +116,8 @@ describe('Analyze Controller (COMP-001 State Machine)', () => {
 
   it('should gracefully degrade on FACILE 503 error (NFR-REL-001)', async () => {
     // Simulate 503 from FACILE
-    nock(`${env.FACILE_HOST}:${env.FACILE_IDENTIFY_PORT}`)
-      .post(`/facileRest/identification`)
+    nock(`${env.FACILE_HOST}`)
+      .post(`/${env.FACILE_IDENTIFY_PORT}/facileRest/identification`)
       .reply(503, 'Service Unavailable');
 
     const payload = {
@@ -137,6 +137,44 @@ describe('Analyze Controller (COMP-001 State Machine)', () => {
     expect(res.body.status).toBe('partial');
     expect(res.body.code).toBe('UPM_DEGRADED');
     expect(res.body.data.adaptedText).toBeTruthy(); 
+  });
+
+  it('should keep adaptedText unchanged when FACILE identifies no guideline violations', async () => {
+    nock(`${env.FACILE_HOST}`)
+      .post(`/${env.FACILE_IDENTIFY_PORT}/facileRest/identification`, body => {
+        expect(body).toMatchObject({
+          originalText: mockOcrResult.rawText,
+          formatInformation: [],
+          guidelines: expect.any(Array)
+        });
+        return true;
+      })
+      .reply(200, { guidelines: [] });
+
+    const payload = {
+      userId: 'test-user',
+      deviceOS: 'iOS',
+      imagePayload: 'data:image/jpeg;base64,mockedbase64string',
+      timestamp: new Date().toISOString()
+    };
+
+    const res = await request(app)
+      .post('/api/v1/ingredients/analyze')
+      .set('Authorization', `Bearer ${validToken}`)
+      .send(payload);
+
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe('success');
+    expect(res.body.code).toBe('SUCCESS');
+    expect(res.body.data.adaptedText).toBe(mockOcrResult.rawText);
+    expect(res.body.data.complexTermMappings).toEqual([]);
+
+    await new Promise(resolve => setTimeout(resolve, 10));
+    expect(UserScan.create).toHaveBeenCalledWith(expect.objectContaining({
+      originalText: mockOcrResult.rawText,
+      adaptedText: mockOcrResult.rawText,
+      facileStatus: 'full'
+    }));
   });
 
   it('should return 400 INVALID_REQUEST on missing required fields', async () => {

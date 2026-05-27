@@ -21,10 +21,13 @@ import { parseIngredientText } from '../parsers/DataParser';
 import { detectAllergens, detectAllergensFromIngredients } from '../services/allergenDetector';
 import { UserScan } from '../models/UserScan';
 import { ApiLog } from '../models/ApiLog';
+import { postProcessOcrResult } from '../services/ocrPostProcessor.service';
+const { preprocessOcrText } = require('../services/textSegmenter');
 
 interface ScanDocument {
   userId: string;
   deviceOS: 'iOS' | 'Android';
+  productType: string;
   originalText: string;
   adaptedText: string;
   allergens: string[];
@@ -36,6 +39,10 @@ interface ScanDocument {
 
 const scanRepository = {
   create: (scanDocument: ScanDocument) => UserScan.create(scanDocument)
+};
+
+type AnalyzeResponseWithProductType = AnalyzeResponseData & {
+  productType: string;
 };
 
 export async function analyzeHandler(req: Request, res: Response, next: NextFunction): Promise<void> {
@@ -86,10 +93,11 @@ export async function analyzeHandler(req: Request, res: Response, next: NextFunc
       throw new OcrUnavailableError((error as Error).message);
     }
     console.log(`[Analyze API - ${scanId}] Executing OCR extraction...`);
-    const ocrResult = await ocrProvider.extract(imagePayload);
+    const ocrResult = postProcessOcrResult(await ocrProvider.extract(imagePayload));
     console.log(`[Analyze API - ${scanId}] OCR Success. Extracted ${ocrResult.rawText.length} characters with confidence ${ocrResult.confidence.toFixed(2)}.`);
     console.log(`\n=================== OCR EXTRACTED TEXT ===================\n${ocrResult.rawText}\n==========================================================\n`);
     const rawText = ocrResult.rawText;
+    const { cleanText, minerals, productType } = await preprocessOcrText(rawText);
     state = 'OCR_DONE';
 
     console.log(`[Analyze API - ${scanId}] Sending text to FACILE NLP adapter...`);
@@ -98,24 +106,29 @@ export async function analyzeHandler(req: Request, res: Response, next: NextFunc
     const facileOrchestrator = new FacileParallelOrchestrator();
     let facileResult;
     try {
-      facileResult = await facileOrchestrator.adapt(rawText);
+      facileResult = await facileOrchestrator.adapt(cleanText);
       console.log(`[Analyze API - ${scanId}] FACILE Success. Status: ${facileResult.status}. Found ${facileResult.violations.length} violations.`);
       state = 'ADAPTED';
     } catch (error) {
       console.warn(`[Analyze API - ${scanId}] FACILE Failed or Timed Out. Falling back to un-adapted text.`, (error as Error).message);
       // Graceful degradation for any FACILE error (503, timeout, etc.)
-      const parsedData = await parseIngredientText(rawText);
-      const textAllergens = detectAllergens(rawText);
+      const parsedData = await parseIngredientText(cleanText);
+      const textAllergens = detectAllergens(cleanText);
       const parsedAllergens = detectAllergensFromIngredients(parsedData.ingredients);
       const allAllergens = Array.from(new Set([...textAllergens, ...parsedAllergens]));
       const processingMs = Date.now() - startTime;
+      const graphicalElements = [
+        ...parsedData.graphicalElements,
+        ...minerals
+      ];
 
-      const responseData: AnalyzeResponseData = {
+      const responseData: AnalyzeResponseWithProductType = {
         scanId,
+        productType,
         originalText: rawText,
-        adaptedText: rawText,
+        adaptedText: cleanText,
         allergens: allAllergens,
-        graphicalElements: parsedData.graphicalElements,
+        graphicalElements,
         complexTermMappings: parsedData.complexTermMappings,
         processingMs
       };
@@ -132,10 +145,11 @@ export async function analyzeHandler(req: Request, res: Response, next: NextFunc
       const scanDocument: ScanDocument = {
         userId,
         deviceOS,
+        productType,
         originalText: rawText,
-        adaptedText: rawText,
+        adaptedText: cleanText,
         allergens: allAllergens,
-        graphicalElements: parsedData.graphicalElements,
+        graphicalElements,
         complexTermMappings: parsedData.complexTermMappings,
         processingMs,
         facileStatus: 'failed'
@@ -159,10 +173,14 @@ export async function analyzeHandler(req: Request, res: Response, next: NextFunc
       return;
     }
 
-    const parsedData = await parseIngredientText(facileResult.adaptedText);
-    const textAllergens = detectAllergens(rawText);
+    const parsedData = await parseIngredientText(cleanText);
+    const textAllergens = detectAllergens(cleanText);
     const parsedAllergens = detectAllergensFromIngredients(parsedData.ingredients);
     const allAllergens = Array.from(new Set([...textAllergens, ...parsedAllergens]));
+    const graphicalElements = [
+      ...parsedData.graphicalElements,
+      ...minerals
+    ];
     const allMappings = [
       ...facileResult.complexTermMappings,
       ...parsedData.complexTermMappings
@@ -175,12 +193,13 @@ export async function analyzeHandler(req: Request, res: Response, next: NextFunc
     console.log(`[Analyze API - ${scanId}] Processing complete in ${processingMs}ms.`);
     console.log(`[Analyze API - ${scanId}] Detected ${allAllergens.length} allergens and mapped ${allMappings.length} complex terms.`);
 
-    const responseData: AnalyzeResponseData = {
+    const responseData: AnalyzeResponseWithProductType = {
       scanId,
+      productType,
       originalText: rawText,
       adaptedText: facileResult.adaptedText,
       allergens: allAllergens,
-      graphicalElements: parsedData.graphicalElements,
+      graphicalElements,
       complexTermMappings: allMappings,
       processingMs
     };
@@ -196,10 +215,11 @@ export async function analyzeHandler(req: Request, res: Response, next: NextFunc
     const scanDocument: ScanDocument = {
       userId,
       deviceOS,
+      productType,
       originalText: rawText,
       adaptedText: facileResult.adaptedText,
       allergens: allAllergens,
-      graphicalElements: parsedData.graphicalElements,
+      graphicalElements,
       complexTermMappings: allMappings,
       processingMs,
       facileStatus: facileResult.status
