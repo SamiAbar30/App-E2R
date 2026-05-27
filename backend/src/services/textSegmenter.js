@@ -16,15 +16,25 @@ function sentenceCount(text) {
   return String(text || '').split(/[.!\n]+/).map((sentence) => sentence.trim()).filter(Boolean).length;
 }
 
+function preserveStructuredDeclaration(rawText) {
+  const matches = String(rawText || '').match(
+    /(?:aditivos?|conservantes?|colorantes?|al[eé]rgenos?)[^:]*:[^.]+\./gi
+  );
+
+  return matches ? matches.join(' ') : '';
+}
+
 /**
  * Runs the OCR text pre-processing pipeline before FACILE adaptation.
  *
  * @param {string} rawText Raw OCR output.
- * @returns {Promise<{ cleanText: string, minerals: Array<{label: string, value: number, unit: string}>, productType: string }>}
+ * @returns {Promise<{ cleanText: string, minerals: Array<{label: string, value: number, unit: string}>, productType: string, rawAdditives: string, rawAllergens: string }>}
  */
 async function preprocessOcrText(rawText) {
   const originalLength = String(rawText || '').length;
   const productType = detectProductType(rawText);
+  const rawAdditives = preserveStructuredDeclaration(rawText);
+  const rawAllergens = rawAdditives;
 
   const { minerals, remainingText } = extractComposition(rawText);
   logInfo('OCR preprocessing composition extraction complete', {
@@ -51,7 +61,7 @@ async function preprocessOcrText(rawText) {
     sentencesRemoved: Math.max(0, beforeLanguageSentences - afterLanguageSentences)
   });
 
-  return { cleanText, minerals, productType };
+  return { cleanText, minerals, productType, rawAdditives, rawAllergens };
 }
 
 module.exports = { preprocessOcrText };

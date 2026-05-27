@@ -51,18 +51,26 @@ export interface AnalyzeRequest {
 export interface AnalyzeResponseData {
   /** Unique scan identifier (UUID v4). */
   scanId: string;
+  /** Product class detected from OCR text. */
+  productType?: 'food' | 'water' | 'supplement' | 'unknown' | string;
   /** Raw text extracted by OCR. */
   originalText: string;
   /** Text adapted to Easy-to-Read format by FACILE. */
   adaptedText: string;
   /** Detected allergen names. */
-  allergens: string[];
+  allergens: AllergenResult[];
+  /** Structured mineral composition values extracted from water labels. */
+  minerals?: MineralResult[];
+  /** Structured additive/E-number values extracted from raw OCR text. */
+  additives?: AdditiveResult[];
   /** Parsed graphical elements (percentages, quantities). */
   graphicalElements: GraphicalElement[];
   /** Mappings from complex terms to simplified equivalents. */
   complexTermMappings: ComplexTermMapping[];
   /** Total pipeline processing time in milliseconds. */
   processingMs: number;
+  /** Whether the response used a degraded fallback path. */
+  degraded?: boolean;
 }
 
 /**
@@ -78,6 +86,25 @@ export interface GraphicalElement {
   value: number;
   /** Unit of measurement. */
   unit: '%' | 'g/100g' | 'mg/100g' | 'g' | 'mg' | 'kg' | 'ml' | 'l';
+}
+
+export interface MineralResult {
+  label: string;
+  value: number;
+  unit: 'mg/l' | 'pH' | string;
+}
+
+export interface AdditiveResult {
+  code: string;
+  name: string;
+  category: string;
+  safe: boolean;
+  warning?: string;
+}
+
+export interface AllergenResult {
+  name: string;
+  severity: 'high' | 'medium' | 'low';
 }
 
 /**

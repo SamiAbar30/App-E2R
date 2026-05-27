@@ -3,9 +3,25 @@ import mongoose, { Schema, Document } from 'mongoose';
 export interface IUserScan extends Document {
   userId: string;
   deviceOS: 'iOS' | 'Android';
+  productType: 'food' | 'water' | 'supplement' | 'unknown';
   originalText: string;
   adaptedText: string;
-  allergens: string[];
+  minerals: Array<{
+    label: string;
+    value: number;
+    unit: string;
+  }>;
+  additives: Array<{
+    code: string;
+    name: string;
+    category: string;
+    safe: boolean;
+    warning?: string;
+  }>;
+  allergens: Array<{
+    name: string;
+    severity: 'high' | 'medium' | 'low';
+  }>;
   graphicalElements: Array<{
     type: 'percentage' | 'quantity';
     ingredient: string;
@@ -35,12 +51,38 @@ const ComplexTermMappingSchema = new Schema({
   category: { type: String, required: true }
 }, { _id: false });
 
+const MineralSchema = new Schema({
+  label: { type: String },
+  value: { type: Number },
+  unit: { type: String }
+}, { _id: false });
+
+const AdditiveSchema = new Schema({
+  code: { type: String },
+  name: { type: String },
+  category: { type: String },
+  safe: { type: Boolean },
+  warning: { type: String }
+}, { _id: false });
+
+const AllergenSchema = new Schema({
+  name: { type: String },
+  severity: { type: String, enum: ['high', 'medium', 'low'] }
+}, { _id: false });
+
 const UserScanSchema = new Schema<IUserScan>({
   userId: { type: String, required: true, index: true },
   deviceOS: { type: String, enum: ['iOS', 'Android'], required: true },
+  productType: {
+    type: String,
+    enum: ['food', 'water', 'supplement', 'unknown'],
+    default: 'unknown'
+  },
   originalText: { type: String, required: true },
   adaptedText: { type: String, required: true },
-  allergens: [{ type: String }],
+  minerals: [MineralSchema],
+  additives: [AdditiveSchema],
+  allergens: [AllergenSchema],
   graphicalElements: [GraphicalElementSchema],
   complexTermMappings: [ComplexTermMappingSchema],
   processingMs: { type: Number, required: true },

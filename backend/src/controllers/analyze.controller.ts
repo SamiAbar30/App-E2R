@@ -7,7 +7,10 @@ import {
   AnalyzeState,
   OcrUnavailableError,
   GraphicalElement,
-  ComplexTermMapping
+  ComplexTermMapping,
+  AllergenResult,
+  AdditiveResult,
+  MineralResult
 } from '../types';
 import { GcpVisionAdapter, IOcrProvider } from '../services/ocrAdapter.service';
 import { MockOcrAdapter } from '../services/mockOcrAdapter.service';
@@ -18,10 +21,12 @@ import { NvidiaOcrAdapter } from '../services/nvidiaOcrAdapter.service';
 import { env } from '../config/env';
 import { FacileParallelOrchestrator, FacileTimeoutError } from '../services/facileOrchestrator.service';
 import { parseIngredientText } from '../parsers/DataParser';
-import { detectAllergens, detectAllergensFromIngredients } from '../services/allergenDetector';
+import { detectAllergens, detectAllergensFromIngredients, extractAllergenBlock } from '../services/allergenDetector';
+import { extractAdditives } from '../services/additiveExtractor';
 import { UserScan } from '../models/UserScan';
 import { ApiLog } from '../models/ApiLog';
 import { postProcessOcrResult } from '../services/ocrPostProcessor.service';
+import { assemble } from '../services/textAssembler';
 const { preprocessOcrText } = require('../services/textSegmenter');
 
 interface ScanDocument {
@@ -30,7 +35,9 @@ interface ScanDocument {
   productType: string;
   originalText: string;
   adaptedText: string;
-  allergens: string[];
+  minerals: MineralResult[];
+  additives: AdditiveResult[];
+  allergens: AllergenResult[];
   graphicalElements: GraphicalElement[];
   complexTermMappings: ComplexTermMapping[];
   processingMs: number;
@@ -43,7 +50,21 @@ const scanRepository = {
 
 type AnalyzeResponseWithProductType = AnalyzeResponseData & {
   productType: string;
+  minerals: MineralResult[];
+  additives: AdditiveResult[];
 };
+
+function mergeUniqueAllergens(...groups: AllergenResult[][]): AllergenResult[] {
+  const byName = new Map<string, AllergenResult>();
+
+  for (const group of groups) {
+    for (const allergen of group) {
+      byName.set(allergen.name.toLowerCase(), allergen);
+    }
+  }
+
+  return Array.from(byName.values());
+}
 
 export async function analyzeHandler(req: Request, res: Response, next: NextFunction): Promise<void> {
   const startTime = Date.now();
@@ -97,7 +118,9 @@ export async function analyzeHandler(req: Request, res: Response, next: NextFunc
     console.log(`[Analyze API - ${scanId}] OCR Success. Extracted ${ocrResult.rawText.length} characters with confidence ${ocrResult.confidence.toFixed(2)}.`);
     console.log(`\n=================== OCR EXTRACTED TEXT ===================\n${ocrResult.rawText}\n==========================================================\n`);
     const rawText = ocrResult.rawText;
-    const { cleanText, minerals, productType } = await preprocessOcrText(rawText);
+    const { cleanText, minerals, productType, rawAdditives, rawAllergens } = await preprocessOcrText(rawText);
+    const additivesPromise = extractAdditives(rawAdditives || rawText);
+    const declaredAllergens = extractAllergenBlock(rawAllergens || rawText);
     state = 'OCR_DONE';
 
     console.log(`[Analyze API - ${scanId}] Sending text to FACILE NLP adapter...`);
@@ -112,26 +135,29 @@ export async function analyzeHandler(req: Request, res: Response, next: NextFunc
     } catch (error) {
       console.warn(`[Analyze API - ${scanId}] FACILE Failed or Timed Out. Falling back to un-adapted text.`, (error as Error).message);
       // Graceful degradation for any FACILE error (503, timeout, etc.)
-      const parsedData = await parseIngredientText(cleanText);
+      const [parsedData, additives] = await Promise.all([
+        parseIngredientText(cleanText),
+        additivesPromise
+      ]);
       const textAllergens = detectAllergens(cleanText);
       const parsedAllergens = detectAllergensFromIngredients(parsedData.ingredients);
-      const allAllergens = Array.from(new Set([...textAllergens, ...parsedAllergens]));
+      const allAllergens = mergeUniqueAllergens(declaredAllergens, textAllergens, parsedAllergens);
       const processingMs = Date.now() - startTime;
-      const graphicalElements = [
-        ...parsedData.graphicalElements,
-        ...minerals
-      ];
+      const graphicalElements = parsedData.graphicalElements;
 
-      const responseData: AnalyzeResponseWithProductType = {
+      const responseData = await assemble({
         scanId,
-        productType,
         originalText: rawText,
         adaptedText: cleanText,
+        productType,
+        minerals,
+        additives,
         allergens: allAllergens,
         graphicalElements,
         complexTermMappings: parsedData.complexTermMappings,
-        processingMs
-      };
+        processingMs,
+        degraded: true
+      }) as AnalyzeResponseWithProductType;
 
       const envelope: ApiEnvelope<AnalyzeResponseData> = {
         status: 'partial',
@@ -148,6 +174,8 @@ export async function analyzeHandler(req: Request, res: Response, next: NextFunc
         productType,
         originalText: rawText,
         adaptedText: cleanText,
+        minerals,
+        additives,
         allergens: allAllergens,
         graphicalElements,
         complexTermMappings: parsedData.complexTermMappings,
@@ -173,14 +201,14 @@ export async function analyzeHandler(req: Request, res: Response, next: NextFunc
       return;
     }
 
-    const parsedData = await parseIngredientText(cleanText);
+    const [parsedData, additives] = await Promise.all([
+      parseIngredientText(cleanText),
+      additivesPromise
+    ]);
     const textAllergens = detectAllergens(cleanText);
     const parsedAllergens = detectAllergensFromIngredients(parsedData.ingredients);
-    const allAllergens = Array.from(new Set([...textAllergens, ...parsedAllergens]));
-    const graphicalElements = [
-      ...parsedData.graphicalElements,
-      ...minerals
-    ];
+    const allAllergens = mergeUniqueAllergens(declaredAllergens, textAllergens, parsedAllergens);
+    const graphicalElements = parsedData.graphicalElements;
     const allMappings = [
       ...facileResult.complexTermMappings,
       ...parsedData.complexTermMappings
@@ -193,16 +221,19 @@ export async function analyzeHandler(req: Request, res: Response, next: NextFunc
     console.log(`[Analyze API - ${scanId}] Processing complete in ${processingMs}ms.`);
     console.log(`[Analyze API - ${scanId}] Detected ${allAllergens.length} allergens and mapped ${allMappings.length} complex terms.`);
 
-    const responseData: AnalyzeResponseWithProductType = {
+    const responseData = await assemble({
       scanId,
-      productType,
       originalText: rawText,
       adaptedText: facileResult.adaptedText,
+      productType,
+      minerals,
+      additives,
       allergens: allAllergens,
       graphicalElements,
       complexTermMappings: allMappings,
-      processingMs
-    };
+      processingMs,
+      degraded: facileResult.status !== 'full'
+    }) as AnalyzeResponseWithProductType;
 
     const envelope: ApiEnvelope<AnalyzeResponseData> = {
       status: facileResult.status === 'full' ? 'success' : 'partial',
@@ -218,6 +249,8 @@ export async function analyzeHandler(req: Request, res: Response, next: NextFunc
       productType,
       originalText: rawText,
       adaptedText: facileResult.adaptedText,
+      minerals,
+      additives,
       allergens: allAllergens,
       graphicalElements,
       complexTermMappings: allMappings,

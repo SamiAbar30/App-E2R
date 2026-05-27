@@ -29,6 +29,8 @@ const mockOcrResult = {
   lines: ['mocked OCR text']
 };
 
+const CABREIROA_WITH_ADDITIVES = `CABREIROA PROYECTO ORIGEN. Composición Analítica / Composição Analitica (mg/l): 174 (Residuo seco/resíduo fixo), 189,7 (HCO3), 57,9 (Na), 24,6 (SiO2), 6,7 (Cl), 4,9 (Ca), 34 (Mg), 3,2 (K), 0,88 (F"), 0,19 (Li). pH: 7,1 Lab. Dr. Oliver Rodés, Septiembre/ Setembro 2022. Conservar en lugar fresco y seco. Sin luz solar ni olores agresivos. Agua mineral natural de mineralización débil. Nº RGSEAA 27.01078/OR. aditivos y alérgenos: E330, E102, E120, cacahuete, soja, leche.`;
+
 jest.mock('../../services/ocrAdapter.service', () => ({
   GcpVisionAdapter: jest.fn().mockImplementation(() => ({
     extract: jest.fn().mockResolvedValue(mockOcrResult)
@@ -68,6 +70,11 @@ describe('Analyze Controller (COMP-001 State Machine)', () => {
   beforeAll(() => {
     app = createApp();
     validToken = jwt.sign({ userId: 'test-user', role: 'user' }, env.JWT_SECRET);
+  });
+
+  beforeEach(() => {
+    mockOcrResult.rawText = 'mocked OCR text';
+    mockOcrResult.lines = ['mocked OCR text'];
   });
 
   afterEach(() => {
@@ -174,6 +181,48 @@ describe('Analyze Controller (COMP-001 State Machine)', () => {
       originalText: mockOcrResult.rawText,
       adaptedText: mockOcrResult.rawText,
       facileStatus: 'full'
+    }));
+  });
+
+  it('should return minerals, additives, allergens, and productType from raw OCR data', async () => {
+    mockOcrResult.rawText = CABREIROA_WITH_ADDITIVES;
+    mockOcrResult.lines = [CABREIROA_WITH_ADDITIVES];
+
+    nock(`${env.FACILE_HOST}`)
+      .post(`/${env.FACILE_IDENTIFY_PORT}/facileRest/identification`)
+      .reply(200, { guidelines: [] });
+
+    const payload = {
+      userId: 'test-user',
+      deviceOS: 'Android',
+      imagePayload: 'data:image/jpeg;base64,mockedbase64string',
+      timestamp: new Date().toISOString()
+    };
+
+    const res = await request(app)
+      .post('/api/v1/ingredients/analyze')
+      .set('Authorization', `Bearer ${validToken}`)
+      .send(payload);
+
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe('success');
+    expect(res.body.data.productType).toBe('water');
+    expect(res.body.data.minerals).toHaveLength(11);
+    expect(res.body.data.minerals).toContainEqual({ label: 'HCO3', value: 189.7, unit: 'mg/l' });
+    expect(res.body.data.additives).toContainEqual(expect.objectContaining({ code: 'E330' }));
+    expect(res.body.data.additives).toContainEqual(expect.objectContaining({ code: 'E102', safe: false }));
+    expect(res.body.data.additives).toContainEqual(expect.objectContaining({ code: 'E120' }));
+    expect(res.body.data.allergens).toContainEqual({ name: 'cacahuete', severity: 'high' });
+    expect(res.body.data.allergens).toContainEqual({ name: 'soja', severity: 'high' });
+    expect(res.body.data.allergens).toContainEqual({ name: 'leche', severity: 'high' });
+    expect(res.body.data.graphicalElements).toEqual([]);
+
+    await new Promise(resolve => setTimeout(resolve, 10));
+    expect(UserScan.create).toHaveBeenCalledWith(expect.objectContaining({
+      productType: 'water',
+      minerals: expect.arrayContaining([expect.objectContaining({ label: 'HCO3' })]),
+      additives: expect.arrayContaining([expect.objectContaining({ code: 'E102', safe: false })]),
+      allergens: expect.arrayContaining([{ name: 'leche', severity: 'high' }])
     }));
   });
 
