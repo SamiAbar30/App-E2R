@@ -26,6 +26,36 @@ const USE_MOCK_API = process.env.EXPO_PUBLIC_USE_MOCK_API === 'true';
 // Rotating mock cases for presentation
 let mockCaseCounter = 0;
 
+const normalizeScanResult = (data) => {
+  if (!data) return data;
+
+  const nestedAdapted = data.adapted || {};
+  const nestedOriginal = data.original || {};
+  const allergens = data.allergens || nestedAdapted.allergens || [];
+  const additives = data.additives || nestedAdapted.additives || [];
+  const adaptedText = data.adaptedText || nestedAdapted.text || '';
+  const originalText = data.originalText || data.extractedText || nestedOriginal.text || '';
+
+  return {
+    ...data,
+    adaptedText,
+    extractedText: originalText,
+    originalText,
+    productType: data.productType || 'unknown',
+    minerals: data.minerals || [],
+    additives,
+    allergens,
+    graphicalElements: data.graphicalElements || nestedAdapted.quantities || [],
+    additivesDetected: additives.map((additive) => (
+      typeof additive === 'string' ? additive : additive.code
+    )),
+    allergensDetected: allergens.map((allergen) => (
+      typeof allergen === 'string' ? allergen : allergen.name
+    )),
+    difficultyLevel: data.difficultyLevel ?? nestedAdapted.score ?? 0,
+  };
+};
+
 const MOCK_CASES = [
   // Case 0: Full extraction (Allergens, Additives, Quantities)
   {
@@ -86,7 +116,7 @@ export const uploadLabelImage = async (imageUri, imageBase64) => {
     if (!currentCase.success) {
       throw new Error(currentCase.errorMsg);
     }
-    return currentCase.data;
+    return normalizeScanResult(currentCase.data);
   }
 
   // Real connection (currently bypassed by USE_MOCK_API)
@@ -116,7 +146,7 @@ export const uploadLabelImage = async (imageUri, imageBase64) => {
     }
 
     const json = await response.json();
-    return json.data;
+    return normalizeScanResult(json.data);
   } catch (error) {
     console.error('uploadLabelImage error:', error);
     throw error;

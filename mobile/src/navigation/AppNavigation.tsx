@@ -2,7 +2,7 @@ import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { HomeScreen } from '../screens/HomeScreen';
-import { CameraScanScreen } from '../screens/CameraScanScreen';
+import { DocumentScannerScreen } from '../screens/DocumentScannerScreen';
 import { AnalysisResultScreen } from '../screens/AnalysisResultScreen';
 import { AccessibilitySettingsScreen } from '../screens/AccessibilitySettingsScreen';
 import { useContrastPalette, useFontFamily } from '../hooks/useAccessibilityEngine';
@@ -32,7 +32,7 @@ export function AppNavigation() {
         }}
       >
         <Stack.Screen name="Home" component={HomeScreen} options={{ title: 'Easy-to-Read' }} />
-        <Stack.Screen name="Camera" component={CameraScanScreen} options={{ title: 'Scan Label' }} />
+        <Stack.Screen name="Camera" component={DocumentScannerScreen} options={{ headerShown: false }} />
         <Stack.Screen name="Result" component={AnalysisResultScreen} options={{ title: 'Adapted Label' }} />
         <Stack.Screen name="AccessibilitySettings" component={AccessibilitySettingsScreen} options={{ title: 'Accessibility' }} />
       </Stack.Navigator>

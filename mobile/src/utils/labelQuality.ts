@@ -28,8 +28,8 @@ export function evaluateLabelQuality(stats?: FrameStats): LabelQualityResult {
   if (!stats) {
     return {
       status: 'unknown',
-      isClearToCapture: true,
-      message: 'CENTER LABEL',
+      isClearToCapture: false,
+      message: 'FIND DOCUMENT',
       borderColor: NEUTRAL_GRAY
     };
   }
