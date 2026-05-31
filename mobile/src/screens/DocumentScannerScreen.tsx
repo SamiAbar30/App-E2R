@@ -13,24 +13,26 @@ import {
   View,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
-import { ArrowLeft, Camera, Image as ImageIcon, RotateCcw, ScanLine } from 'lucide-react-native';
+import { Camera, HelpCircle, Image as ImageIcon, RotateCcw, ScanLine, X } from 'lucide-react-native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { uploadLabelImage } from '../api/client';
-import {
-  useContrastPalette,
-  useEffectiveFontScale,
-  useInteractionAccessibility,
-} from '../hooks/useAccessibilityEngine';
+import { AppShell, appTheme } from '../components/AppShell';
+import { useEffectiveFontScale, useInteractionAccessibility } from '../hooks/useAccessibilityEngine';
 import { useDocumentQuality } from '../hooks/useDocumentQuality';
 import { useAppStore } from '../store/useAppStore';
-import type { AcceptedDocumentImage } from '../types/documentScanner';
+import type { AcceptedDocumentImage, DocumentQualityResult, DocumentQualityState } from '../types/documentScanner';
 import { createImageDataUri } from '../utils/documentImageQuality';
 
 type RootStackParamList = {
+  Home: undefined;
+  Camera: undefined;
   Result: undefined;
+  History: undefined;
+  AccessibilitySettings: undefined;
+  ScanGuidance: { cta?: 'scan' | 'back' } | undefined;
 };
 
-type NavigationProp = NativeStackNavigationProp<RootStackParamList, 'Result'>;
+type NavigationProp = NativeStackNavigationProp<RootStackParamList, 'Camera'>;
 
 type ScanDocumentResponse = {
   scannedImages?: string[];
@@ -45,13 +47,55 @@ type NativeDocumentScanner = {
   }): Promise<ScanDocumentResponse>;
 };
 
+const stateText: Record<DocumentQualityState, { title: string; hint: string }> = {
+  GOOD: {
+    title: 'Imagen lista',
+    hint: 'La etiqueta tiene calidad suficiente para OCR.',
+  },
+  BAD_BLUR: {
+    title: 'Imagen borrosa',
+    hint: 'Sujeta el movil con firmeza y vuelve a escanear.',
+  },
+  BAD_LIGHT: {
+    title: 'Falta luz',
+    hint: 'Acerca la etiqueta a una zona con mas luz.',
+  },
+  LOW_CONTRAST: {
+    title: 'Texto con poco contraste',
+    hint: 'Evita fondos oscuros o brillantes.',
+  },
+  GLARE: {
+    title: 'Hay reflejos',
+    hint: 'Inclina un poco el producto para quitar el brillo.',
+  },
+  OCCLUDED: {
+    title: 'Texto tapado',
+    hint: 'No cubras la etiqueta con los dedos.',
+  },
+  TOO_SMALL: {
+    title: 'Etiqueta demasiado pequena',
+    hint: 'Acerca la camara hasta que el texto ocupe mas espacio.',
+  },
+  BAD_PERSPECTIVE: {
+    title: 'Etiqueta inclinada',
+    hint: 'Pon el producto mas plano frente a la camara.',
+  },
+  UNSTABLE: {
+    title: 'Movimiento detectado',
+    hint: 'Mantente quieto durante la captura.',
+  },
+  UNKNOWN: {
+    title: 'Calidad no confirmada',
+    hint: 'Vuelve a escanear si el texto no se ve claro.',
+  },
+};
+
 function cleanBase64(value: string): string {
   return value.includes(',') ? value.split(',').pop() ?? '' : value;
 }
 
 async function requestAndroidCameraPermission(): Promise<boolean> {
   if (Platform.OS !== 'android') return true;
-
   const result = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.CAMERA);
   return result === PermissionsAndroid.RESULTS.GRANTED;
 }
@@ -64,6 +108,10 @@ function getDocumentScanner(): NativeDocumentScanner | null {
   return turboModule?.scanDocument ? turboModule : null;
 }
 
+function toSpanishQuality(quality: DocumentQualityResult) {
+  return stateText[quality.state] ?? stateText.UNKNOWN;
+}
+
 export function DocumentScannerScreen({ navigation }: { navigation: NavigationProp }) {
   const { setImageUri, imageUri, setProcessing, setResult, setError, isProcessing } = useAppStore();
   const [imageBase64, setImageBase64] = useState<string | null>(null);
@@ -71,46 +119,35 @@ export function DocumentScannerScreen({ navigation }: { navigation: NavigationPr
   const [isScanning, setScanning] = useState(false);
   const autoOpened = useRef(false);
 
-  const palette = useContrastPalette();
   const fontScale = useEffectiveFontScale();
   const { minTouchSize } = useInteractionAccessibility();
   const { isEvaluating, evaluateScannedDocument, resetQuality } = useDocumentQuality();
 
-  const acceptImage = useCallback(
-    (document: AcceptedDocumentImage) => {
-      setRejectedImage(null);
-      setImageUri(document.uri);
-      setImageBase64(document.base64);
-    },
-    [setImageUri]
-  );
-
   const evaluateAndAccept = useCallback(
     async (uri: string, base64: string, width?: number, height?: number) => {
       const qualityResult = await evaluateScannedDocument({ uri, base64, width, height });
-      const document: AcceptedDocumentImage = {
-        uri,
-        base64,
-        width,
-        height,
-        quality: qualityResult,
-      };
+      const document: AcceptedDocumentImage = { uri, base64, width, height, quality: qualityResult };
 
       if (qualityResult.shouldAccept) {
-        acceptImage(document);
+        setRejectedImage(null);
+        setImageUri(uri);
+        setImageBase64(base64);
         return;
       }
 
+      setImageUri(null);
+      setImageBase64(null);
       setRejectedImage(document);
-      Alert.alert(qualityResult.message, qualityResult.hint);
+      const message = toSpanishQuality(qualityResult);
+      Alert.alert(message.title, message.hint);
     },
-    [acceptImage, evaluateScannedDocument]
+    [evaluateScannedDocument, setImageUri]
   );
 
   const startScan = useCallback(async () => {
     const hasAndroidPermission = await requestAndroidCameraPermission();
     if (!hasAndroidPermission) {
-      Alert.alert('Camera permission needed', 'Camera access is required to scan documents.');
+      Alert.alert('Permiso de camara necesario', 'Activa el permiso de camara para escanear etiquetas.');
       return;
     }
 
@@ -122,8 +159,8 @@ export function DocumentScannerScreen({ navigation }: { navigation: NavigationPr
       const scanner = getDocumentScanner();
       if (!scanner) {
         Alert.alert(
-          'Scanner build needed',
-          'The native document scanner is not available in this app build. Run npx expo prebuild and npx expo run:android, then test again outside Expo Go.'
+          'Escaner no disponible',
+          'Esta funcion necesita una build de desarrollo. No funciona dentro de Expo Go.'
         );
         return;
       }
@@ -138,16 +175,16 @@ export function DocumentScannerScreen({ navigation }: { navigation: NavigationPr
 
       const firstImage = response.scannedImages?.[0];
       if (!firstImage) {
-        Alert.alert('No document found', 'Try again with the document fully visible.');
+        Alert.alert('No se encontro etiqueta', 'Vuelve a intentarlo con la etiqueta completa dentro del marco.');
         return;
       }
 
       const base64 = cleanBase64(firstImage);
       await evaluateAndAccept(createImageDataUri(base64), base64);
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Document scan failed.';
+      const message = err instanceof Error ? err.message : 'No se pudo escanear la etiqueta.';
       setError(message);
-      Alert.alert('Scanner error', message);
+      Alert.alert('Error de escaneo', message);
     } finally {
       setScanning(false);
     }
@@ -160,7 +197,7 @@ export function DocumentScannerScreen({ navigation }: { navigation: NavigationPr
 
     const timeout = setTimeout(() => {
       void startScan();
-    }, 250);
+    }, 200);
 
     return () => clearTimeout(timeout);
   }, [imageUri, startScan]);
@@ -176,7 +213,7 @@ export function DocumentScannerScreen({ navigation }: { navigation: NavigationPr
     if (result.canceled) return;
     const asset = result.assets[0];
     if (!asset.base64) {
-      Alert.alert('Image unavailable', 'Could not read this image. Please choose another one.');
+      Alert.alert('Imagen no disponible', 'No se pudo leer esta imagen. Elige otra.');
       return;
     }
 
@@ -192,254 +229,350 @@ export function DocumentScannerScreen({ navigation }: { navigation: NavigationPr
       setResult(data as any);
       navigation.navigate('Result');
     } catch (err: any) {
-      setError(err.message);
-      Alert.alert('Error analyzing image', 'Make sure the backend is running and try again.');
+      const message = err?.message || 'No se pudo analizar la etiqueta.';
+      setError(message);
+      Alert.alert('No se pudo analizar', message);
     } finally {
       setProcessing(false);
     }
   };
 
-  const retake = () => {
+  const clearPreview = () => {
     setImageUri(null);
     setImageBase64(null);
     setRejectedImage(null);
     resetQuality();
-    void startScan();
+    autoOpened.current = false;
   };
 
-  const canUseRejected = rejectedImage?.base64 && rejectedImage?.uri;
+  const rejectedMessage = rejectedImage ? toSpanishQuality(rejectedImage.quality) : null;
 
   return (
-    <View style={[styles.container, { backgroundColor: imageUri ? palette.background : '#000000' }]}>
-      {imageUri ? (
-        <View style={styles.previewContainer}>
-          <Image source={{ uri: imageUri }} style={styles.image} accessibilityLabel="Scanned document" />
-
-          {isProcessing ? (
-            <View style={styles.loadingContainer}>
-              <ActivityIndicator size="large" color={palette.accent} />
-              <Text style={[styles.loadingText, { color: palette.text, fontSize: 16 * fontScale }]}>
-                Analyzing...
-              </Text>
-            </View>
-          ) : (
-            <View style={styles.actionRow}>
+    <AppShell
+      title="Escanear etiqueta"
+      activeTab="scan"
+      onHome={() => navigation.navigate('Home')}
+      onScan={() => void startScan()}
+      onHistory={() => navigation.navigate('History')}
+      onSettings={() => navigation.navigate('AccessibilitySettings')}
+      scroll={false}
+      showBottomNav={false}
+    >
+      <View style={styles.screen}>
+        {imageUri ? (
+          <>
+            <View style={styles.previewHeader}>
               <TouchableOpacity
-                style={[
-                  styles.button,
-                  {
-                    backgroundColor: palette.background,
-                    borderColor: palette.border,
-                    borderWidth: 1,
-                    minHeight: minTouchSize,
-                  },
-                ]}
-                onPress={retake}
+                onPress={() => navigation.navigate('Home')}
+                style={[styles.iconButton, { minHeight: minTouchSize, minWidth: minTouchSize }]}
                 accessibilityRole="button"
-                accessibilityLabel="Scan again"
+                accessibilityLabel="Cerrar"
               >
-                <RotateCcw color={palette.text} size={20} />
-                <Text style={[styles.buttonText, { color: palette.text, fontSize: 16 * fontScale }]}>
-                  Scan again
-                </Text>
+                <X color={appTheme.text} size={26} />
               </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.button, { backgroundColor: palette.accent, minHeight: minTouchSize }]}
-                onPress={analyzeImage}
-                accessibilityRole="button"
-                accessibilityLabel="Analyze scan"
-              >
-                <ScanLine color={palette.background} size={20} />
-                <Text style={[styles.buttonText, { color: palette.background, fontSize: 16 * fontScale }]}>
-                  Analyze
-                </Text>
-              </TouchableOpacity>
-            </View>
-          )}
-        </View>
-      ) : (
-        <View style={styles.launcher}>
-          <TouchableOpacity
-            style={styles.closeButton}
-            onPress={() => navigation.goBack()}
-            accessibilityRole="button"
-            accessibilityLabel="Go back"
-          >
-            <ArrowLeft color="#ffffff" size={32} strokeWidth={2.6} />
-          </TouchableOpacity>
-
-          {rejectedImage ? (
-            <View style={styles.rejectedCard}>
-              <Text style={[styles.rejectedTitle, { fontSize: 16 * fontScale }]}>
-                {rejectedImage.quality.message}
+              <Text style={[styles.previewTitle, { fontSize: 20 * Math.min(fontScale, 1.25) }]}>
+                Imagen validada
               </Text>
-              <Text style={[styles.rejectedHint, { fontSize: 13 * fontScale }]}>
-                {rejectedImage.quality.hint}
-              </Text>
+              <View style={{ width: minTouchSize }} />
             </View>
-          ) : null}
-
-          {(isScanning || isEvaluating) && (
-            <View style={styles.inlineLoading}>
-              <ActivityIndicator color="#ffffff" />
-            </View>
-          )}
-
-          <View style={styles.bottomControls}>
-            <TouchableOpacity
-              style={[styles.galleryButton, { minWidth: minTouchSize, minHeight: minTouchSize }]}
-              onPress={pickImage}
-              accessibilityRole="button"
-              accessibilityLabel="Pick from Gallery"
-            >
-              <ImageIcon color="#ffffff" size={28} strokeWidth={2.4} />
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[
-                styles.shutterButton,
-                { width: Math.max(78, minTouchSize + 30), height: Math.max(78, minTouchSize + 30) },
-              ]}
-              onPress={startScan}
-              disabled={isScanning || isEvaluating}
-              accessibilityRole="button"
-              accessibilityLabel="Scan document"
-              accessibilityState={{ disabled: isScanning || isEvaluating }}
-            >
-              <View style={[styles.shutterInner, (isScanning || isEvaluating) && styles.shutterInnerBusy]}>
-                {isScanning || isEvaluating ? (
-                  <ActivityIndicator color="#2b2d42" />
-                ) : (
-                  <Camera color="#2b2d42" size={30} strokeWidth={2.5} />
-                )}
+            <Image source={{ uri: imageUri }} style={styles.image} accessibilityLabel="Etiqueta escaneada" />
+            <View style={styles.readyCard}>
+              <View style={styles.readyIcon}>
+                <CheckIcon />
               </View>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[
-                styles.useAnywayButton,
-                {
-                  minWidth: minTouchSize,
-                  minHeight: minTouchSize,
-                  opacity: canUseRejected ? 1 : 0,
-                },
-              ]}
-              disabled={!canUseRejected}
-              onPress={() => {
-                if (rejectedImage) acceptImage(rejectedImage);
-              }}
-              accessibilityRole="button"
-              accessibilityLabel="Use scan anyway"
-              accessibilityState={{ disabled: !canUseRejected }}
-            >
-              <Text style={styles.useAnywayText}>Use</Text>
-            </TouchableOpacity>
+              <View style={styles.readyText}>
+                <Text style={[styles.readyTitle, { fontSize: 20 * Math.min(fontScale, 1.25) }]}>
+                  Etiqueta lista
+                </Text>
+                <Text style={[styles.readyBody, { fontSize: 15 * Math.min(fontScale, 1.2) }]}>
+                  La imagen paso la validacion y puede enviarse al OCR.
+                </Text>
+              </View>
+            </View>
+            {isProcessing ? (
+              <View style={styles.loadingBlock}>
+                <ActivityIndicator size="large" color={appTheme.primary} />
+                <Text style={styles.loadingText}>Analizando etiqueta...</Text>
+              </View>
+            ) : (
+              <View style={styles.actionRow}>
+                <TouchableOpacity
+                  onPress={() => {
+                    clearPreview();
+                    void startScan();
+                  }}
+                  style={[styles.secondaryButton, { minHeight: Math.max(60, minTouchSize) }]}
+                  accessibilityRole="button"
+                  accessibilityLabel="Escanear otra vez"
+                >
+                  <RotateCcw color={appTheme.text} size={22} />
+                  <Text style={styles.secondaryButtonText}>Repetir</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={analyzeImage}
+                  style={[styles.primaryButton, { minHeight: Math.max(60, minTouchSize) }]}
+                  accessibilityRole="button"
+                  accessibilityLabel="Analizar etiqueta"
+                >
+                  <ScanLine color="#ffffff" size={22} />
+                  <Text style={styles.primaryButtonText}>Analizar</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </>
+        ) : (
+          <View style={styles.launchPanel}>
+            <View style={styles.scanIcon}>
+              {isScanning || isEvaluating ? (
+                <ActivityIndicator size="large" color={appTheme.primary} />
+              ) : (
+                <ScanLine color={appTheme.primary} size={54} strokeWidth={2.2} />
+              )}
+            </View>
+            <Text style={[styles.launchTitle, { fontSize: 24 * Math.min(fontScale, 1.25) }]}>
+              {isScanning || isEvaluating ? 'Validando imagen' : 'Escaner de etiquetas'}
+            </Text>
+            <Text style={[styles.launchText, { fontSize: 16 * Math.min(fontScale, 1.2) }]}>
+              {isScanning || isEvaluating
+                ? 'Espera un momento. Revisamos nitidez, luz y encuadre.'
+                : 'Se abrira el escaner de documentos. Usa una foto clara de la etiqueta del producto.'}
+            </Text>
+            {rejectedMessage && (
+              <View style={styles.errorCard}>
+                <Text style={styles.errorTitle}>{rejectedMessage.title}</Text>
+                <Text style={styles.errorText}>{rejectedMessage.hint}</Text>
+              </View>
+            )}
+            <View style={styles.launchActions}>
+              <TouchableOpacity
+                onPress={() => void startScan()}
+                disabled={isScanning || isEvaluating}
+                style={[styles.primaryButtonWide, { minHeight: Math.max(62, minTouchSize) }]}
+                accessibilityRole="button"
+                accessibilityLabel="Abrir escaner"
+                accessibilityState={{ disabled: isScanning || isEvaluating }}
+              >
+                <Camera color="#ffffff" size={22} />
+                <Text style={styles.primaryButtonText}>Abrir escaner</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={pickImage}
+                disabled={isScanning || isEvaluating}
+                style={[styles.secondaryButtonWide, { minHeight: Math.max(58, minTouchSize) }]}
+                accessibilityRole="button"
+                accessibilityLabel="Elegir de galeria"
+              >
+                <ImageIcon color={appTheme.primary} size={22} />
+                <Text style={styles.secondaryButtonText}>Galeria</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => navigation.navigate('ScanGuidance', { cta: 'back' })}
+                style={[styles.textButton, { minHeight: minTouchSize }]}
+                accessibilityRole="button"
+                accessibilityLabel="Como escanear bien"
+              >
+                <HelpCircle color={appTheme.primary} size={20} />
+                <Text style={styles.textButtonLabel}>Como escanear bien</Text>
+              </TouchableOpacity>
+            </View>
           </View>
-        </View>
-      )}
-    </View>
+        )}
+      </View>
+    </AppShell>
   );
 }
 
+function CheckIcon() {
+  return <Text style={styles.checkText}>OK</Text>;
+}
+
 const styles = StyleSheet.create({
-  container: { flex: 1 },
-  previewContainer: { flex: 1, padding: 16 },
-  image: { flex: 1, borderRadius: 8, marginBottom: 12, resizeMode: 'contain' },
-  loadingContainer: { alignItems: 'center', padding: 24 },
-  loadingText: { marginTop: 8, textAlign: 'center' },
-  actionRow: { flexDirection: 'row', justifyContent: 'space-around', paddingBottom: 24, gap: 12 },
-  button: {
+  screen: {
     flex: 1,
-    paddingVertical: 14,
-    paddingHorizontal: 18,
-    borderRadius: 8,
+    gap: 14,
+  },
+  previewHeader: {
     alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  iconButton: {
+    alignItems: 'center',
+    borderRadius: 999,
     justifyContent: 'center',
+  },
+  previewTitle: {
+    color: appTheme.text,
+    fontWeight: '900',
+  },
+  image: {
+    backgroundColor: '#ffffff',
+    borderRadius: 8,
+    flex: 1,
+    resizeMode: 'contain',
+  },
+  readyCard: {
+    alignItems: 'flex-start',
+    backgroundColor: appTheme.surface,
+    borderColor: appTheme.secondary,
+    borderRadius: 8,
+    borderWidth: 2,
+    flexDirection: 'row',
+    gap: 12,
+    padding: 16,
+  },
+  readyIcon: {
+    alignItems: 'center',
+    backgroundColor: appTheme.secondarySoft,
+    borderRadius: 999,
+    height: 44,
+    justifyContent: 'center',
+    width: 44,
+  },
+  checkText: {
+    color: appTheme.secondaryText,
+    fontSize: 13,
+    fontWeight: '900',
+  },
+  readyText: {
+    flex: 1,
+  },
+  readyTitle: {
+    color: appTheme.text,
+    fontWeight: '900',
+  },
+  readyBody: {
+    color: appTheme.muted,
+    fontWeight: '600',
+    lineHeight: 22,
+    marginTop: 4,
+  },
+  loadingBlock: {
+    alignItems: 'center',
+    paddingVertical: 12,
+  },
+  loadingText: {
+    color: appTheme.text,
+    fontWeight: '800',
+    marginTop: 8,
+  },
+  actionRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  primaryButton: {
+    alignItems: 'center',
+    backgroundColor: appTheme.primary,
+    borderRadius: 8,
+    flex: 1,
     flexDirection: 'row',
     gap: 8,
+    justifyContent: 'center',
   },
-  buttonText: { fontWeight: '800' },
-  launcher: {
+  secondaryButton: {
+    alignItems: 'center',
+    backgroundColor: appTheme.surface,
+    borderColor: appTheme.border,
+    borderRadius: 8,
+    borderWidth: 1,
     flex: 1,
-    backgroundColor: '#000000',
-    justifyContent: 'flex-end',
-  },
-  closeButton: {
-    position: 'absolute',
-    top: 42,
-    left: 22,
-    width: 54,
-    height: 54,
-    borderRadius: 999,
-    backgroundColor: 'rgba(0,0,0,0.42)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 20,
-  },
-  rejectedCard: {
-    position: 'absolute',
-    left: 24,
-    right: 24,
-    top: 112,
-    borderRadius: 8,
-    padding: 14,
-    backgroundColor: 'rgba(239,35,60,0.88)',
-  },
-  rejectedTitle: { color: '#ffffff', fontWeight: '900', textAlign: 'center' },
-  rejectedHint: { color: '#ffffff', marginTop: 4, textAlign: 'center' },
-  inlineLoading: {
-    position: 'absolute',
-    top: '46%',
-    alignSelf: 'center',
-    alignItems: 'center',
-    borderRadius: 999,
-    padding: 16,
-    backgroundColor: 'rgba(0,0,0,0.58)',
-  },
-  bottomControls: {
     flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 28,
-    paddingBottom: 34,
-  },
-  galleryButton: {
-    borderRadius: 8,
-    backgroundColor: 'rgba(43,45,66,0.78)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.72)',
-    alignItems: 'center',
+    gap: 8,
     justifyContent: 'center',
   },
-  shutterButton: {
-    borderRadius: 999,
-    borderWidth: 4,
-    borderColor: '#ffffff',
-    backgroundColor: 'rgba(255,255,255,0.24)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  shutterInner: {
-    width: 58,
-    height: 58,
-    borderRadius: 999,
-    backgroundColor: '#ffffff',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  shutterInnerBusy: {
-    opacity: 0.82,
-  },
-  useAnywayButton: {
-    borderRadius: 8,
-    backgroundColor: 'rgba(43,45,66,0.78)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.72)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  useAnywayText: {
+  primaryButtonText: {
     color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '900',
+  },
+  secondaryButtonText: {
+    color: appTheme.text,
+    fontSize: 16,
+    fontWeight: '900',
+  },
+  launchPanel: {
+    alignItems: 'center',
+    backgroundColor: appTheme.surface,
+    borderColor: '#e5e2e1',
+    borderRadius: 8,
+    borderWidth: 1,
+    flex: 1,
+    justifyContent: 'center',
+    padding: 24,
+  },
+  scanIcon: {
+    alignItems: 'center',
+    backgroundColor: appTheme.primarySoft,
+    borderRadius: 999,
+    height: 132,
+    justifyContent: 'center',
+    marginBottom: 24,
+    width: 132,
+  },
+  launchTitle: {
+    color: appTheme.text,
+    fontWeight: '900',
+    textAlign: 'center',
+  },
+  launchText: {
+    color: appTheme.muted,
+    fontWeight: '600',
+    lineHeight: 24,
+    marginTop: 10,
+    textAlign: 'center',
+  },
+  errorCard: {
+    backgroundColor: appTheme.dangerSoft,
+    borderColor: appTheme.danger,
+    borderLeftWidth: 6,
+    borderRadius: 8,
+    marginTop: 18,
+    padding: 14,
+    width: '100%',
+  },
+  errorTitle: {
+    color: appTheme.dangerText,
+    fontSize: 17,
+    fontWeight: '900',
+  },
+  errorText: {
+    color: appTheme.text,
+    fontSize: 14,
+    fontWeight: '700',
+    lineHeight: 20,
+    marginTop: 4,
+  },
+  launchActions: {
+    gap: 12,
+    marginTop: 28,
+    width: '100%',
+  },
+  primaryButtonWide: {
+    alignItems: 'center',
+    backgroundColor: appTheme.primary,
+    borderRadius: 8,
+    flexDirection: 'row',
+    gap: 10,
+    justifyContent: 'center',
+  },
+  secondaryButtonWide: {
+    alignItems: 'center',
+    backgroundColor: appTheme.primarySoft,
+    borderColor: appTheme.primary,
+    borderRadius: 8,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: 10,
+    justifyContent: 'center',
+  },
+  textButton: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 8,
+    justifyContent: 'center',
+  },
+  textButtonLabel: {
+    color: appTheme.primary,
     fontWeight: '900',
   },
 });

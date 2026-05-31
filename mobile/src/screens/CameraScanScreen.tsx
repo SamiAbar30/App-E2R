@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -14,6 +14,9 @@ import { Camera, Image as ImageIcon } from 'lucide-react-native';
 import { useAppStore } from '../store/useAppStore';
 import { uploadLabelImage } from '../api/client';
 import { CameraFrameProcessor, FrameStats } from '../components/CameraFrameProcessor';
+import { ImageQualityBanner } from '../components/ImageQualityBanner';
+import { validateScannedLabel } from '../utils/validateScannedLabel';
+import type { ImageValidationResult } from '../types/imageValidation';
 import {
   useContrastPalette,
   useEffectiveFontScale,
@@ -33,12 +36,35 @@ export function CameraScanScreen({ navigation }: { navigation: NavigationProp })
   const [mockStats, setMockStats] = useState<FrameStats | undefined>(undefined);
   const [previewSize, setPreviewSize] = useState<Size | undefined>(undefined);
   const [isCapturing, setIsCapturing] = useState(false);
+  const [imageQuality, setImageQuality] = useState<ImageValidationResult | null>(null);
+  const [isValidating, setIsValidating] = useState(false);
   const [permission, requestPermission] = useCameraPermissions();
   const cameraRef = useRef<CameraView | null>(null);
 
   const palette = useContrastPalette();
   const fontScale = useEffectiveFontScale();
   const { minTouchSize } = useInteractionAccessibility();
+
+  // Run quality validation whenever a new image is captured
+  useEffect(() => {
+    if (!imageBase64) {
+      setImageQuality(null);
+      return;
+    }
+    setIsValidating(true);
+    // Use a minimal timeout to let the UI render the preview first
+    const timer = setTimeout(() => {
+      try {
+        const result = validateScannedLabel({ base64: imageBase64 });
+        setImageQuality(result);
+      } catch {
+        setImageQuality(null);
+      } finally {
+        setIsValidating(false);
+      }
+    }, 50);
+    return () => clearTimeout(timer);
+  }, [imageBase64]);
 
   const pickImage = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -63,7 +89,7 @@ export function CameraScanScreen({ navigation }: { navigation: NavigationProp })
     if (!permission?.granted) {
       const permissionResult = await requestPermission();
       if (!permissionResult.granted) {
-        alert("You've refused to allow this app to access your camera!");
+        alert('Necesitamos permiso de camara para escanear etiquetas.');
       }
       return;
     }
@@ -90,7 +116,7 @@ export function CameraScanScreen({ navigation }: { navigation: NavigationProp })
       }
     } catch (err: any) {
       setError(err.message);
-      alert('Error taking photo. Please try again.');
+      alert('No se pudo tomar la foto. Intentalo otra vez.');
     } finally {
       setIsCapturing(false);
     }
@@ -98,16 +124,17 @@ export function CameraScanScreen({ navigation }: { navigation: NavigationProp })
 
   const analyzeImage = async () => {
     if (!imageUri || !imageBase64) return;
+    // Guard: only allow analysis when quality check passes
+    if (imageQuality && !imageQuality.isAccepted) return;
     
     setProcessing(true);
     try {
-      console.log('Analyzing image...');
       const data = await uploadLabelImage(imageUri, imageBase64);
       setResult(data as any);
       navigation.navigate('Result');
     } catch (err: any) {
       setError(err.message);
-      alert('Error analyzing image. Make sure backend is running.');
+      alert(err.message || 'No se pudo analizar la etiqueta.');
     } finally {
       setProcessing(false);
     }
@@ -122,13 +149,19 @@ export function CameraScanScreen({ navigation }: { navigation: NavigationProp })
     <View style={[styles.container, { backgroundColor: palette.background }]}>
       {imageUri ? (
         <View style={styles.previewContainer}>
-          <Image source={{ uri: imageUri }} style={styles.image} accessibilityLabel="Captured label" />
+          <Image source={{ uri: imageUri }} style={styles.image} accessibilityLabel="Etiqueta capturada" />
+
+          <ImageQualityBanner
+            validation={imageQuality}
+            isValidating={isValidating}
+            fontScale={fontScale}
+          />
           
           {isProcessing ? (
             <View style={styles.loadingContainer}>
               <ActivityIndicator size="large" color={palette.accent} />
               <Text style={[styles.loadingText, { color: palette.text, fontSize: 16 * fontScale }]}>
-                Analyzing Label...
+                Analizando etiqueta...
               </Text>
             </View>
           ) : (
@@ -138,19 +171,27 @@ export function CameraScanScreen({ navigation }: { navigation: NavigationProp })
                 onPress={() => {
                   setImageUri(null);
                   setImageBase64(null);
+                  setImageQuality(null);
+                  setIsValidating(false);
                 }}
                 accessibilityRole="button"
-                accessibilityLabel="Retake photo"
+                accessibilityLabel="Repetir foto"
               >
-                <Text style={{ color: palette.text, fontSize: 16 * fontScale, fontWeight: 'bold' }}>Retake</Text>
+                <Text style={{ color: palette.text, fontSize: 16 * fontScale, fontWeight: 'bold' }}>Repetir</Text>
               </TouchableOpacity>
               <TouchableOpacity 
-                style={[styles.button, { backgroundColor: palette.accent, minHeight: minTouchSize }]} 
+                style={[
+                  styles.button,
+                  { backgroundColor: palette.accent, minHeight: minTouchSize },
+                  (isValidating || (imageQuality && !imageQuality.isAccepted)) && styles.buttonDisabled,
+                ]} 
                 onPress={analyzeImage}
+                disabled={isValidating || (imageQuality != null && !imageQuality.isAccepted)}
                 accessibilityRole="button"
-                accessibilityLabel="Analyze photo"
+                accessibilityLabel="Analizar foto"
+                accessibilityState={{ disabled: isValidating || (imageQuality != null && !imageQuality.isAccepted) }}
               >
-                <Text style={{ color: palette.background, fontSize: 16 * fontScale, fontWeight: 'bold' }}>Analyze</Text>
+                <Text style={{ color: palette.background, fontSize: 16 * fontScale, fontWeight: 'bold' }}>Analizar</Text>
               </TouchableOpacity>
             </View>
           )}
@@ -162,15 +203,15 @@ export function CameraScanScreen({ navigation }: { navigation: NavigationProp })
           ) : (
             <View style={[styles.permissionPanel, { backgroundColor: palette.background }]}>
               <Text style={[styles.permissionText, { color: palette.text, fontSize: 18 * fontScale }]}>
-                Camera permission is needed to scan a label.
+                Necesitamos permiso de camara para escanear una etiqueta.
               </Text>
               <TouchableOpacity
                 style={[styles.button, { backgroundColor: palette.accent, minHeight: minTouchSize }]}
                 onPress={requestPermission}
                 accessibilityRole="button"
-                accessibilityLabel="Allow camera"
+                accessibilityLabel="Permitir camara"
               >
-                <Text style={{ color: palette.background, fontSize: 16 * fontScale, fontWeight: 'bold' }}>Allow Camera</Text>
+                <Text style={{ color: palette.background, fontSize: 16 * fontScale, fontWeight: 'bold' }}>Permitir camara</Text>
               </TouchableOpacity>
             </View>
           )}
@@ -182,7 +223,7 @@ export function CameraScanScreen({ navigation }: { navigation: NavigationProp })
               style={[styles.galleryButton, { minWidth: minTouchSize, minHeight: minTouchSize }]}
               onPress={pickImage}
               accessibilityRole="button"
-              accessibilityLabel="Pick from Gallery"
+              accessibilityLabel="Elegir de galeria"
             >
               <ImageIcon color="#ffffff" size={28} strokeWidth={2.4} />
             </TouchableOpacity>
@@ -192,7 +233,7 @@ export function CameraScanScreen({ navigation }: { navigation: NavigationProp })
               onPress={takePhoto}
               disabled={isCapturing}
               accessibilityRole="button"
-              accessibilityLabel="Take Photo"
+              accessibilityLabel="Tomar foto"
               accessibilityState={{ disabled: isCapturing }}
             >
               <View style={[styles.shutterInner, isCapturing && styles.shutterInnerBusy]}>
@@ -230,6 +271,7 @@ const styles = StyleSheet.create({
   permissionPanel: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
   permissionText: { textAlign: 'center', marginBottom: 20, lineHeight: 26 },
   button: { paddingVertical: 14, paddingHorizontal: 24, borderRadius: 8, alignItems: 'center', minWidth: 140, justifyContent: 'center' },
+  buttonDisabled: { opacity: 0.45 },
   actionRow: { flexDirection: 'row', justifyContent: 'space-around', paddingBottom: 24 },
   loadingContainer: { alignItems: 'center', padding: 24 },
   loadingText: { marginTop: 12 },

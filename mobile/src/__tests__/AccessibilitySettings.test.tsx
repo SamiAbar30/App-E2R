@@ -11,12 +11,12 @@ describe('AccessibilitySettings', () => {
       </AccessibilityEngineProvider>
     );
 
-    const cognitiveButton = getByRole('button', { name: 'Apply Cognitive profile' });
+    const cognitiveButton = getByRole('button', { name: 'Aplicar perfil cognitivo' });
     fireEvent.press(cognitiveButton);
 
-    expect(getByText('Font Scale: 1.3')).toBeTruthy();
+    expect(getByText('Tamano de texto: 1.3')).toBeTruthy();
     // In our context Cognitive sets contrastMode to Normal
-    expect(getByText('Contrast: Normal')).toBeTruthy();
+    expect(getByText('Contraste: Normal')).toBeTruthy();
   });
 
   it('applies Visual profile with HighContrastDark', () => {
@@ -26,11 +26,11 @@ describe('AccessibilitySettings', () => {
       </AccessibilityEngineProvider>
     );
 
-    const visualButton = getByRole('button', { name: 'Apply Visual profile' });
+    const visualButton = getByRole('button', { name: 'Aplicar perfil visual' });
     fireEvent.press(visualButton);
 
-    expect(getByText('Font Scale: 1.8')).toBeTruthy();
-    expect(getByText('Contrast: HighContrastDark')).toBeTruthy();
+    expect(getByText('Tamano de texto: 1.8')).toBeTruthy();
+    expect(getByText('Contraste: HighContrastDark')).toBeTruthy();
   });
 
   it('applies Motor profile with large touch bounds and debounce', () => {
@@ -40,10 +40,10 @@ describe('AccessibilitySettings', () => {
       </AccessibilityEngineProvider>
     );
 
-    const motorButton = getByRole('button', { name: 'Apply Motor profile' });
+    const motorButton = getByRole('button', { name: 'Aplicar perfil motor' });
     fireEvent.press(motorButton);
 
-    expect(getByText('Touch Size: 64')).toBeTruthy();
-    expect(getByText('Debounce: 800')).toBeTruthy();
+    expect(getByText('Tamano de boton: 64')).toBeTruthy();
+    expect(getByText('Margen de toque: 800')).toBeTruthy();
   });
 });

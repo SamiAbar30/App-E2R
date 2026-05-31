@@ -20,6 +20,8 @@ export type DocumentQualityState =
   | 'BAD_BLUR'
   | 'BAD_LIGHT'
   | 'LOW_CONTRAST'
+  | 'GLARE'
+  | 'OCCLUDED'
   | 'TOO_SMALL'
   | 'BAD_PERSPECTIVE'
   | 'UNSTABLE'
@@ -49,6 +51,9 @@ export type DocumentQualityMetrics = {
   foregroundFillRatio: number;
   megapixels: number;
   shortSide: number;
+  glareRatio: number;
+  overexposed: boolean;
+  edgeVoidRatio: number;
   fillRatio?: number;
   maxPerspectiveError?: number;
   stabilityDelta?: number;

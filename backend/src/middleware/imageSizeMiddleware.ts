@@ -11,12 +11,14 @@ import { InvalidImageError } from '../types';
 function calculateBase64ByteSize(base64: string): number {
   // Remove data URI prefix if present (e.g., "data:image/jpeg;base64,")
   const stripped = base64.includes(',') ? base64.split(',')[1] : base64;
+  // Remove any whitespace or newlines that might be in the payload
+  const cleaned = stripped.replace(/[\r\n\s]+/g, '');
 
-  const len = stripped.length;
+  const len = cleaned.length;
   // Count trailing padding characters
   let padding = 0;
-  if (len >= 2 && stripped[len - 1] === '=') padding++;
-  if (len >= 2 && stripped[len - 2] === '=') padding++;
+  if (len >= 2 && cleaned[len - 1] === '=') padding++;
+  if (len >= 2 && cleaned[len - 2] === '=') padding++;
 
   return Math.ceil(len * 3 / 4) - padding;
 }
@@ -29,7 +31,8 @@ function calculateBase64ByteSize(base64: string): number {
  */
 function isValidBase64(str: string): boolean {
   const stripped = str.includes(',') ? str.split(',')[1] : str;
-  return /^[A-Za-z0-9+/]*={0,2}$/.test(stripped);
+  const cleaned = stripped.replace(/[\r\n\s]+/g, '');
+  return /^[A-Za-z0-9+/]*={0,2}$/.test(cleaned);
 }
 
 /**

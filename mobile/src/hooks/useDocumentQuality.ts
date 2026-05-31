@@ -10,8 +10,8 @@ const INITIAL_QUALITY: DocumentQualityResult = {
   state: 'UNKNOWN',
   score: 0,
   shouldAccept: false,
-  message: 'Scan quality unknown',
-  hint: 'Start the scanner and place the document inside the frame.',
+  message: 'Calidad no confirmada',
+  hint: 'Inicia el escaner y coloca la etiqueta dentro del marco.',
   metrics: {
     focus: 0,
     brightness: 0,
@@ -21,6 +21,9 @@ const INITIAL_QUALITY: DocumentQualityResult = {
     foregroundFillRatio: 0,
     megapixels: 0,
     shortSide: 0,
+    glareRatio: 0,
+    overexposed: false,
+    edgeVoidRatio: 0,
   },
   reasons: [],
 };

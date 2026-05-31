@@ -24,9 +24,9 @@ jest.mock('../../models/ApiLog', () => ({
 }));
 
 const mockOcrResult = {
-  rawText: 'mocked OCR text',
+  rawText: 'Ingredientes: agua, azucar, aceite y sal.',
   confidence: 0.99,
-  lines: ['mocked OCR text']
+  lines: ['Ingredientes: agua, azucar, aceite y sal.']
 };
 
 const CABREIROA_WITH_ADDITIVES = `CABREIROA PROYECTO ORIGEN. Composición Analítica / Composição Analitica (mg/l): 174 (Residuo seco/resíduo fixo), 189,7 (HCO3), 57,9 (Na), 24,6 (SiO2), 6,7 (Cl), 4,9 (Ca), 34 (Mg), 3,2 (K), 0,88 (F"), 0,19 (Li). pH: 7,1 Lab. Dr. Oliver Rodés, Septiembre/ Setembro 2022. Conservar en lugar fresco y seco. Sin luz solar ni olores agresivos. Agua mineral natural de mineralización débil. Nº RGSEAA 27.01078/OR. aditivos y alérgenos: E330, E102, E120, cacahuete, soja, leche.`;
@@ -73,8 +73,8 @@ describe('Analyze Controller (COMP-001 State Machine)', () => {
   });
 
   beforeEach(() => {
-    mockOcrResult.rawText = 'mocked OCR text';
-    mockOcrResult.lines = ['mocked OCR text'];
+    mockOcrResult.rawText = 'Ingredientes: agua, azucar, aceite y sal.';
+    mockOcrResult.lines = ['Ingredientes: agua, azucar, aceite y sal.'];
   });
 
   afterEach(() => {
@@ -234,5 +234,28 @@ describe('Analyze Controller (COMP-001 State Machine)', () => {
 
     expect(res.status).toBe(400);
     expect(res.body.errorCode).toBe('INVALID_REQUEST');
+  });
+
+  it('should reject OCR text that is not a product label', async () => {
+    mockOcrResult.rawText = 'Permiso de residencia temporal y trabajo. Valido hasta 08 2000. Documento oficial.';
+    mockOcrResult.lines = [mockOcrResult.rawText];
+
+    const payload = {
+      userId: 'test-user',
+      deviceOS: 'Android',
+      imagePayload: 'data:image/jpeg;base64,mockedbase64string',
+      timestamp: new Date().toISOString()
+    };
+
+    const res = await request(app)
+      .post('/api/v1/ingredients/analyze')
+      .set('Authorization', `Bearer ${validToken}`)
+      .send(payload);
+
+    expect(res.status).toBe(422);
+    expect(res.body.status).toBe('error');
+    expect(res.body.code).toBe('INVALID_PRODUCT_LABEL');
+    expect(res.body.message).toContain('etiqueta de producto');
+    expect(res.body.data).toBeNull();
   });
 });

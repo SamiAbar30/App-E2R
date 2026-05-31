@@ -12,7 +12,7 @@ describe('CameraScanScreen', () => {
         <CameraScanScreen navigation={mockNavigation} />
       </AccessibilityEngineProvider>
     );
-    expect(getByRole('button', { name: 'Take Photo' })).toBeTruthy();
+    expect(getByRole('button', { name: 'Tomar foto' })).toBeTruthy();
   });
 
   it('mocks blurred frame and keeps capture available with HOLD STEADY guidance', () => {
@@ -25,9 +25,9 @@ describe('CameraScanScreen', () => {
     const mockBlurBtn = getByTestId('mock-blur');
     fireEvent.press(mockBlurBtn);
 
-    expect(getByText('HOLD STEADY')).toBeTruthy();
+    expect(getByText('MANTENTE QUIETO')).toBeTruthy();
     
-    const captureBtn = getByRole('button', { name: 'Take Photo' });
+    const captureBtn = getByRole('button', { name: 'Tomar foto' });
     expect(captureBtn.props.accessibilityState?.disabled ?? captureBtn.props.disabled ?? false).toBe(false);
   });
 
@@ -41,9 +41,9 @@ describe('CameraScanScreen', () => {
     const mockDarkBtn = getByTestId('mock-dark');
     fireEvent.press(mockDarkBtn);
 
-    expect(getByText('MOVE CLOSER')).toBeTruthy();
+    expect(getByText('FALTA LUZ')).toBeTruthy();
     
-    const captureBtn = getByRole('button', { name: 'Take Photo' });
+    const captureBtn = getByRole('button', { name: 'Tomar foto' });
     expect(captureBtn.props.accessibilityState?.disabled ?? captureBtn.props.disabled ?? false).toBe(false);
   });
 });

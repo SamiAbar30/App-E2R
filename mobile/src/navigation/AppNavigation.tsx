@@ -5,6 +5,8 @@ import { HomeScreen } from '../screens/HomeScreen';
 import { DocumentScannerScreen } from '../screens/DocumentScannerScreen';
 import { AnalysisResultScreen } from '../screens/AnalysisResultScreen';
 import { AccessibilitySettingsScreen } from '../screens/AccessibilitySettingsScreen';
+import { HistoryScreen } from '../screens/HistoryScreen';
+import { ScanGuidanceScreen } from '../screens/ScanGuidanceScreen';
 import { useContrastPalette, useFontFamily } from '../hooks/useAccessibilityEngine';
 
 export type RootStackParamList = {
@@ -12,6 +14,8 @@ export type RootStackParamList = {
   Camera: undefined;
   Result: undefined;
   AccessibilitySettings: undefined;
+  History: undefined;
+  ScanGuidance: { cta?: 'scan' | 'back' } | undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -31,10 +35,12 @@ export function AppNavigation() {
           headerTitleStyle: { fontWeight: 'bold', fontFamily },
         }}
       >
-        <Stack.Screen name="Home" component={HomeScreen} options={{ title: 'Easy-to-Read' }} />
+        <Stack.Screen name="Home" component={HomeScreen} options={{ headerShown: false }} />
         <Stack.Screen name="Camera" component={DocumentScannerScreen} options={{ headerShown: false }} />
-        <Stack.Screen name="Result" component={AnalysisResultScreen} options={{ title: 'Adapted Label' }} />
-        <Stack.Screen name="AccessibilitySettings" component={AccessibilitySettingsScreen} options={{ title: 'Accessibility' }} />
+        <Stack.Screen name="Result" component={AnalysisResultScreen} options={{ headerShown: false }} />
+        <Stack.Screen name="AccessibilitySettings" component={AccessibilitySettingsScreen} options={{ headerShown: false }} />
+        <Stack.Screen name="History" component={HistoryScreen} options={{ headerShown: false }} />
+        <Stack.Screen name="ScanGuidance" component={ScanGuidanceScreen} options={{ headerShown: false }} />
       </Stack.Navigator>
     </NavigationContainer>
   );

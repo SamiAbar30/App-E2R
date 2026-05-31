@@ -29,7 +29,7 @@ export function evaluateLabelQuality(stats?: FrameStats): LabelQualityResult {
     return {
       status: 'unknown',
       isClearToCapture: false,
-      message: 'FIND DOCUMENT',
+      message: 'BUSCA LA ETIQUETA',
       borderColor: NEUTRAL_GRAY
     };
   }
@@ -38,7 +38,7 @@ export function evaluateLabelQuality(stats?: FrameStats): LabelQualityResult {
     return {
       status: 'tooDark',
       isClearToCapture: false,
-      message: 'MOVE CLOSER',
+      message: 'FALTA LUZ',
       borderColor: WARNING_RED
     };
   }
@@ -47,7 +47,7 @@ export function evaluateLabelQuality(stats?: FrameStats): LabelQualityResult {
     return {
       status: 'blurred',
       isClearToCapture: false,
-      message: 'HOLD STEADY',
+      message: 'MANTENTE QUIETO',
       borderColor: WARNING_RED
     };
   }
@@ -61,7 +61,7 @@ export function evaluateLabelQuality(stats?: FrameStats): LabelQualityResult {
       return {
         status: 'tooSmall',
         isClearToCapture: false,
-        message: 'MOVE CLOSER',
+        message: 'ACERCA LA CAMARA',
         borderColor: WARNING_RED
       };
     }
@@ -70,7 +70,7 @@ export function evaluateLabelQuality(stats?: FrameStats): LabelQualityResult {
       return {
         status: 'offCenter',
         isClearToCapture: false,
-        message: 'CENTER LABEL',
+        message: 'CENTRA LA ETIQUETA',
         borderColor: WARNING_RED
       };
     }
@@ -79,7 +79,7 @@ export function evaluateLabelQuality(stats?: FrameStats): LabelQualityResult {
   return {
     status: 'ready',
     isClearToCapture: true,
-    message: 'LABEL READY',
+    message: 'ETIQUETA LISTA',
     borderColor: READY_GREEN
   };
 }

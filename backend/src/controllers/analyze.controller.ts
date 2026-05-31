@@ -27,6 +27,7 @@ import { UserScan } from '../models/UserScan';
 import { ApiLog } from '../models/ApiLog';
 import { postProcessOcrResult } from '../services/ocrPostProcessor.service';
 import { assemble } from '../services/textAssembler';
+import { expandCognitiveAccessibility } from '../services/accessibilityExpander';
 const { preprocessOcrText } = require('../services/textSegmenter');
 
 interface ScanDocument {
@@ -64,6 +65,29 @@ function mergeUniqueAllergens(...groups: AllergenResult[][]): AllergenResult[] {
   }
 
   return Array.from(byName.values());
+}
+
+function isLikelyProductLabel({
+  rawText,
+  cleanText,
+  productType,
+  minerals,
+  rawAdditives,
+  rawAllergens
+}: {
+  rawText: string;
+  cleanText: string;
+  productType: string;
+  minerals: MineralResult[];
+  rawAdditives?: string;
+  rawAllergens?: string;
+}): boolean {
+  if (productType && productType !== 'unknown') return true;
+  if (minerals.length > 0) return true;
+  if ((rawAdditives || rawAllergens)?.trim()) return true;
+
+  const text = `${rawText || ''} ${cleanText || ''}`;
+  return /ingredientes?|al[eé]rgenos?|contiene|aditivos?|conservantes?|colorantes?|valor\s+energ[eé]tico|informaci[oó]n\s+nutricional|agua\s+mineral|composici[oó]n\s+anal[ií]tica|manantial|conservar|consumir\s+preferentemente|e-?\d{3}/i.test(text);
 }
 
 export async function analyzeHandler(req: Request, res: Response, next: NextFunction): Promise<void> {
@@ -123,13 +147,40 @@ export async function analyzeHandler(req: Request, res: Response, next: NextFunc
     const declaredAllergens = extractAllergenBlock(rawAllergens || rawText);
     state = 'OCR_DONE';
 
+    if (!isLikelyProductLabel({ rawText, cleanText, productType, minerals, rawAdditives, rawAllergens })) {
+      const processingMs = Date.now() - startTime;
+      const envelope: ApiEnvelope<AnalyzeResponseData> = {
+        status: 'error',
+        data: null,
+        code: 'INVALID_PRODUCT_LABEL',
+        message: 'La imagen no parece una etiqueta de producto. Intenta escanear la lista de ingredientes o la etiqueta del envase.'
+      };
+
+      res.status(422).json(envelope);
+
+      void ApiLog.create({
+        endpoint: '/api/v1/ingredients/analyze',
+        method: 'POST',
+        userId,
+        statusCode: 422,
+        responseCode: envelope.code,
+        latencyMs: processingMs,
+        requestSize: imagePayload.length,
+        state: 'OCR_DONE'
+      }).catch(err => console.error('[DB Save Error] ApiLog:', err));
+
+      return;
+    }
+
     console.log(`[Analyze API - ${scanId}] Sending text to FACILE NLP adapter...`);
 
     state = 'ADAPT_EXEC';
     const facileOrchestrator = new FacileParallelOrchestrator();
     let facileResult;
+    const expandedText = expandCognitiveAccessibility(cleanText);
+
     try {
-      facileResult = await facileOrchestrator.adapt(cleanText);
+      facileResult = await facileOrchestrator.adapt(expandedText);
       console.log(`[Analyze API - ${scanId}] FACILE Success. Status: ${facileResult.status}. Found ${facileResult.violations.length} violations.`);
       state = 'ADAPTED';
     } catch (error) {
@@ -148,7 +199,7 @@ export async function analyzeHandler(req: Request, res: Response, next: NextFunc
       const responseData = await assemble({
         scanId,
         originalText: rawText,
-        adaptedText: cleanText,
+        adaptedText: expandedText,
         productType,
         minerals,
         additives,
@@ -173,7 +224,7 @@ export async function analyzeHandler(req: Request, res: Response, next: NextFunc
         deviceOS,
         productType,
         originalText: rawText,
-        adaptedText: cleanText,
+        adaptedText: expandedText,
         minerals,
         additives,
         allergens: allAllergens,

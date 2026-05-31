@@ -50,5 +50,47 @@ describe('evaluateDocumentQuality', () => {
     expect(quality.shouldAccept).toBe(true);
     expect(quality.state).toBe('GOOD');
   });
-});
 
+  it('returns new metric fields in result', () => {
+    const image = makeJpegBase64(900, 900, (x, y) => {
+      const stripe = (Math.floor(x / 16) + Math.floor(y / 16)) % 2 === 0 ? 40 : 245;
+      return [stripe, stripe, stripe];
+    });
+    const quality = evaluateDocumentQuality({ base64: image });
+
+    expect(quality.metrics).toHaveProperty('glareRatio');
+    expect(quality.metrics).toHaveProperty('overexposed');
+    expect(quality.metrics).toHaveProperty('edgeVoidRatio');
+    expect(typeof quality.metrics.glareRatio).toBe('number');
+    expect(typeof quality.metrics.overexposed).toBe('boolean');
+    expect(typeof quality.metrics.edgeVoidRatio).toBe('number');
+  });
+
+  it('detects glare from bright white hotspot in center', () => {
+    // Image is mostly normal checkerboard but the central 60% is all white (255,255,255)
+    const image = makeJpegBase64(900, 900, (x, y) => {
+      const isCentral = x >= 180 && x <= 720 && y >= 180 && y <= 720;
+      if (isCentral) return [255, 255, 255]; // white glare hotspot
+      const stripe = (Math.floor(x / 16) + Math.floor(y / 16)) % 2 === 0 ? 40 : 200;
+      return [stripe, stripe, stripe];
+    });
+    const quality = evaluateDocumentQuality({ base64: image });
+
+    expect(quality.metrics.glareRatio).toBeGreaterThan(0.1);
+    // Should be rejected (either GLARE or BAD_LIGHT depending on overall brightness)
+    expect(quality.shouldAccept).toBe(false);
+  });
+
+  it('detects overexposure from uniformly bright image', () => {
+    // Image is globally very bright with high saturation ratio
+    const image = makeJpegBase64(900, 900, (x, y) => {
+      // Mostly washed out white/near-white with minimal variation
+      const val = 230 + (x % 20 < 10 ? 10 : 25);
+      return [val, val, val];
+    });
+    const quality = evaluateDocumentQuality({ base64: image });
+
+    expect(quality.metrics.overexposed).toBe(true);
+    expect(quality.shouldAccept).toBe(false);
+  });
+});

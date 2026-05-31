@@ -26,40 +26,51 @@ const DEFAULT_METRICS: DocumentQualityMetrics = {
   foregroundFillRatio: 0,
   megapixels: 0,
   shortSide: 0,
+  glareRatio: 0,
+  overexposed: false,
+  edgeVoidRatio: 0,
 };
 
 const STATE_MESSAGES: Record<DocumentQualityState, { message: string; hint: string }> = {
   GOOD: {
-    message: 'Document ready',
-    hint: 'The scan is clear enough to analyze.',
+    message: 'Imagen lista',
+    hint: 'La etiqueta se ve clara para analizar.',
   },
   BAD_BLUR: {
-    message: 'Too blurry, hold still',
-    hint: 'Place the document on a flat surface and keep the phone steady.',
+    message: 'Imagen borrosa',
+    hint: 'Apoya el producto y sujeta el movil con firmeza.',
   },
   BAD_LIGHT: {
-    message: 'Too dark, move to better light',
-    hint: 'Avoid shadows and glare before scanning again.',
+    message: 'Falta luz',
+    hint: 'Evita sombras y reflejos antes de escanear otra vez.',
   },
   LOW_CONTRAST: {
-    message: 'Low contrast',
-    hint: 'Use a brighter background or better light.',
+    message: 'Poco contraste',
+    hint: 'Busca mejor luz para que el texto destaque.',
   },
   TOO_SMALL: {
-    message: 'Move closer',
-    hint: 'The document should fill more of the frame.',
+    message: 'Acerca la camara',
+    hint: 'La etiqueta debe ocupar mas espacio en la imagen.',
   },
   BAD_PERSPECTIVE: {
-    message: 'Align document in frame',
-    hint: 'Hold the phone parallel to the document.',
+    message: 'Alinea la etiqueta',
+    hint: 'Mantén el movil paralelo a la etiqueta.',
   },
   UNSTABLE: {
-    message: 'Hold steady',
-    hint: 'Wait until the outline stops moving.',
+    message: 'Mantente quieto',
+    hint: 'Espera a que el marco deje de moverse.',
+  },
+  GLARE: {
+    message: 'Hay reflejos',
+    hint: 'Inclina el producto para quitar el brillo.',
+  },
+  OCCLUDED: {
+    message: 'Texto tapado',
+    hint: 'Asegura que nada cubre la etiqueta.',
   },
   UNKNOWN: {
-    message: 'Scan quality unknown',
-    hint: 'Try scanning again if the text looks unclear.',
+    message: 'Calidad no confirmada',
+    hint: 'Repite el escaneo si el texto no se ve claro.',
   },
 };
 
@@ -195,6 +206,16 @@ function computeImageMetrics(base64?: string, fallbackWidth = 0, fallbackHeight 
   let foregroundPixels = 0;
   let sampledPixels = 0;
 
+  // Glare detection — track bright hotspot pixels in the central 60% of the image
+  let centralGlarePixels = 0;
+  let centralSampledPixels = 0;
+
+  // Occlusion detection — 4×4 grid of edge-pixel counters
+  const GRID_COLS = 4;
+  const GRID_ROWS = 4;
+  const gridEdgeCounts = new Array(GRID_COLS * GRID_ROWS).fill(0);
+  const gridTotalCounts = new Array(GRID_COLS * GRID_ROWS).fill(0);
+
   for (let y = 0; y < height; y += sampleStep) {
     for (let x = 0; x < width; x += sampleStep) {
       const isBorder =
@@ -241,6 +262,27 @@ function computeImageMetrics(base64?: string, fallbackWidth = 0, fallbackHeight 
       edgeEnergy += laplacian * laplacian;
       edgeSamples += 1;
       if (laplacian > 22) edgePixels += 1;
+
+      // --- Glare: concentrated bright hotspots in central 60% ---
+      const isCentral =
+        x >= width * 0.2 && x <= width * 0.8 &&
+        y >= height * 0.2 && y <= height * 0.8;
+      if (isCentral) {
+        centralSampledPixels += 1;
+        // A glare pixel is very bright with low color saturation (white hotspot)
+        if (lum > 245 && Math.max(r, g, b) - Math.min(r, g, b) < 30) {
+          centralGlarePixels += 1;
+        }
+      }
+
+      // --- Occlusion: track edges per grid cell ---
+      const cellCol = Math.min(GRID_COLS - 1, Math.floor((x / width) * GRID_COLS));
+      const cellRow = Math.min(GRID_ROWS - 1, Math.floor((y / height) * GRID_ROWS));
+      const cellIndex = cellRow * GRID_COLS + cellCol;
+      gridTotalCounts[cellIndex] += 1;
+      if (laplacian > 22) {
+        gridEdgeCounts[cellIndex] += 1;
+      }
     }
   }
 
@@ -256,15 +298,42 @@ function computeImageMetrics(base64?: string, fallbackWidth = 0, fallbackHeight 
   const variance =
     luminances.reduce((sum, value) => sum + (value - mean) ** 2, 0) / luminances.length;
 
+  // Glare ratio: fraction of central pixels that are bright hotspots
+  const glareRatio = centralSampledPixels === 0 ? 0 : centralGlarePixels / centralSampledPixels;
+
+  // Overexposure: image globally too bright + heavily saturated
+  const brightnessNorm = mean / 255;
+  const satRatio = sampledPixels === 0 ? 0 : saturatedPixels / sampledPixels;
+  const overexposed = brightnessNorm > 0.82 && satRatio > 0.25;
+
+  // Occlusion: count inner grid cells (rows 1-2, cols 1-2 = 4 central cells) with near-zero edges
+  // A cell is "void" if its edge density is below 1%
+  const innerCellIndices = [
+    1 * GRID_COLS + 1, 1 * GRID_COLS + 2,
+    2 * GRID_COLS + 1, 2 * GRID_COLS + 2,
+  ];
+  let voidCells = 0;
+  for (const idx of innerCellIndices) {
+    const cellTotal = gridTotalCounts[idx];
+    const cellEdges = gridEdgeCounts[idx];
+    if (cellTotal > 0 && cellEdges / cellTotal < 0.01) {
+      voidCells += 1;
+    }
+  }
+  const edgeVoidRatio = voidCells / innerCellIndices.length;
+
   return {
     focus: edgeSamples === 0 ? 0 : edgeEnergy / edgeSamples / 255,
-    brightness: mean / 255,
+    brightness: brightnessNorm,
     contrast: Math.sqrt(variance) / 255,
     edgeDensity: edgeSamples === 0 ? 0 : edgePixels / edgeSamples,
-    saturatedRatio: sampledPixels === 0 ? 0 : saturatedPixels / sampledPixels,
+    saturatedRatio: satRatio,
     foregroundFillRatio: sampledPixels === 0 ? 0 : foregroundPixels / sampledPixels,
     megapixels: (width * height) / 1_000_000,
     shortSide: Math.min(width, height),
+    glareRatio,
+    overexposed,
+    edgeVoidRatio,
   };
 }
 
@@ -279,11 +348,17 @@ function chooseState(metrics: DocumentQualityMetrics): DocumentQualityState {
   ) {
     return 'TOO_SMALL';
   }
+  // Glare: concentrated bright hotspots in the central label area
+  if (metrics.glareRatio > 0.12) return 'GLARE';
+  // Overexposure: globally washed out
+  if (metrics.overexposed) return 'BAD_LIGHT';
   if (metrics.saturatedRatio > 0.14 && metrics.edgeDensity < 0.1) return 'BAD_LIGHT';
   if (metrics.brightness > 0 && metrics.brightness < 0.18) return 'BAD_LIGHT';
   if (metrics.contrast > 0 && metrics.contrast < 0.045) return 'LOW_CONTRAST';
   if (metrics.edgeDensity > 0 && metrics.edgeDensity < 0.018) return 'BAD_BLUR';
   if (metrics.focus > 0 && metrics.focus < 8.5) return 'BAD_BLUR';
+  // Occlusion: large edge-void zones in the central cells
+  if (metrics.edgeVoidRatio > 0.5) return 'OCCLUDED';
   if (metrics.fillRatio !== undefined && metrics.fillRatio < 0.32) return 'TOO_SMALL';
   if (metrics.maxPerspectiveError !== undefined && metrics.maxPerspectiveError > 24) {
     return 'BAD_PERSPECTIVE';

@@ -1,25 +1,17 @@
-import { Platform, NativeModules } from 'react-native';
+import { Platform } from 'react-native';
 
 const getApiUrl = () => {
   if (process.env.EXPO_PUBLIC_API_URL) {
     return process.env.EXPO_PUBLIC_API_URL;
   }
 
-  // If you are on an Android emulator, 10.0.2.2 points to your PC's localhost.
-  // If you are on an iOS simulator, localhost works out of the box.
-  // If you are on a physical phone, you MUST run `adb reverse tcp:3000 tcp:3000`
-  // for localhost to work!
   return Platform.OS === 'android' ? 'http://10.0.2.2:3000/api' : 'http://localhost:3000/api';
 };
 
 const API_URL = getApiUrl();
-console.log('\n\n======================================');
-console.log('API_URL RESOLVED TO:', API_URL);
-console.log('SCRIPT_URL WAS:', NativeModules.SourceCode?.scriptURL);
-console.log('======================================\n\n');
 
 if (!API_URL) {
-  console.warn('Warning: API_URL could not be determined.');
+  console.warn('No se pudo determinar API_URL.');
 }
 const USE_MOCK_API = process.env.EXPO_PUBLIC_USE_MOCK_API === 'true';
 
@@ -57,54 +49,52 @@ const normalizeScanResult = (data) => {
 };
 
 const MOCK_CASES = [
-  // Case 0: Full extraction (Allergens, Additives, Quantities)
   {
     success: true,
     data: {
+      productType: 'food',
       original: {
-        text: "Ingredients: Water, Sugar, Citric Acid (E330), Natural Flavors, Peanuts, Sodium Benzoate.",
-        lines: ["Ingredients: Water, Sugar,", "Citric Acid (E330), Natural Flavors,", "Peanuts, Sodium Benzoate."],
+        text: "Ingredientes: agua, azucar, acido citrico (E330), aromas naturales, cacahuete, benzoato sodico.",
+        lines: ["Ingredientes: agua, azucar,", "acido citrico (E330), aromas naturales,", "cacahuete, benzoato sodico."],
         confidence: 0.98
       },
       adapted: {
-        text: "Ingredients: Water, Sugar, Citric Acid, Natural Flavors, Peanuts, Preservative (Sodium Benzoate).",
+        text: "Contiene agua, azucar, acido citrico, aromas naturales, cacahuete y conservante.",
         quantities: [],
-        allergens: ["peanuts"],
+        allergens: [{ name: "cacahuete", severity: "high" }],
         additives: [
-          { code: "E330", name: "Citric Acid", function: "Acidity regulator, antioxidant" },
-          { code: "E211", name: "Sodium Benzoate", function: "Preservative" }
+          { code: "E330", name: "Acido citrico", category: "Corrector de acidez", safe: true },
+          { code: "E211", name: "Benzoato sodico", category: "Conservante", safe: true }
         ],
         score: 4.2
       }
     }
   },
-  // Case 1: Clean Label (No allergens, no additives)
   {
     success: true,
     data: {
+      productType: 'water',
       original: {
-        text: "Ingredients: 100% Organic Apples, Water.",
-        lines: ["Ingredients:", "100% Organic Apples, Water."],
+        text: "Agua mineral natural de mineralizacion debil. Conservar en lugar fresco y seco.",
+        lines: ["Agua mineral natural de mineralizacion debil.", "Conservar en lugar fresco y seco."],
         confidence: 0.99
       },
       adapted: {
-        text: "Ingredients: Organic Apples, Water.",
-        quantities: [{ original: "100%", value: 100, unit: "%", index: 13 }],
+        text: "Agua mineral natural. Guarda la botella en un lugar fresco y seco.",
+        quantities: [],
         allergens: [],
         additives: [],
         score: 1.5
       }
     }
   },
-  // Case 2: Error State (Blurry or Unreadable)
   {
     success: false,
-    errorMsg: "Error: Image is too blurry or text could not be recognized. Please retake the photo."
+    errorMsg: "La imagen no se ve clara. Vuelve a escanear la etiqueta."
   }
 ];
 
 export const uploadLabelImage = async (imageUri, imageBase64) => {
-  console.log('uploadLabelImage called');
   if (USE_MOCK_API) {
     // 1. Prepare connection (simulate network delay)
     await new Promise(resolve => setTimeout(resolve, 1500));
@@ -119,16 +109,18 @@ export const uploadLabelImage = async (imageUri, imageBase64) => {
     return normalizeScanResult(currentCase.data);
   }
 
+  // Ensure the base64 string doesn't contain the data URI prefix (e.g. data:image/jpeg;base64,)
+  const rawBase64 = imageBase64.includes(',') ? imageBase64.split(',').pop() : imageBase64;
+
   // Real connection (currently bypassed by USE_MOCK_API)
   const payload = {
     userId: 'test-user',
     deviceOS: Platform.OS === 'ios' ? 'iOS' : 'Android',
-    imagePayload: imageBase64,
+    imagePayload: rawBase64,
     timestamp: new Date().toISOString()
   };
 
   try {
-    console.log('uploadLabelImage payload:', payload);
     const response = await fetch(`${API_URL}/v1/ingredients/analyze`, {
       method: 'POST',
       body: JSON.stringify(payload),
@@ -142,13 +134,12 @@ export const uploadLabelImage = async (imageUri, imageBase64) => {
 
     if (!response.ok) {
       const errJson = await response.json().catch(() => ({}));
-      throw new Error(`API error! status: ${response.status}, msg: ${errJson.message || 'unknown'}`);
+      throw new Error(errJson.message || 'No se pudo analizar la etiqueta.');
     }
 
     const json = await response.json();
     return normalizeScanResult(json.data);
   } catch (error) {
-    console.error('uploadLabelImage error:', error);
     throw error;
   }
 };

@@ -21,6 +21,8 @@ const COLORS: Record<DocumentQualityState, string> = {
   BAD_BLUR: '#ef6c00',
   BAD_LIGHT: '#ef233c',
   LOW_CONTRAST: '#ef6c00',
+  GLARE: '#ef6c00',
+  OCCLUDED: '#ef6c00',
   TOO_SMALL: '#ef6c00',
   BAD_PERSPECTIVE: '#ef6c00',
   UNSTABLE: '#ef6c00',
@@ -116,4 +118,3 @@ const styles = StyleSheet.create({
     opacity: 0.95,
   },
 });
-
