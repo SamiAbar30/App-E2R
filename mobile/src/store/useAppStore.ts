@@ -3,20 +3,33 @@ import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { ScanResult } from '../types';
 
+export type SyncTask = {
+  id: string;
+  type: 'RATING';
+  payload: any;
+  timestamp: string;
+};
+
 export type AppState = {
   imageUri: string | null;
   isProcessing: boolean;
+  isOffline: boolean;
   result: ScanResult | null;
   error: string | null;
   history: ScanResult[];
   
   setImageUri: (uri: string | null) => void;
   setProcessing: (status: boolean) => void;
+  setIsOffline: (status: boolean) => void;
   setResult: (data: ScanResult) => void;
   setError: (errorMessage: string) => void;
   reset: () => void;
   addToHistory: (newResult: ScanResult) => void;
   clearHistory: () => void;
+  
+  syncQueue: SyncTask[];
+  enqueueSyncTask: (task: Omit<SyncTask, 'id' | 'timestamp'>) => void;
+  dequeueSyncTask: (taskId: string) => void;
 };
 
 export const useAppStore = create<AppState>()(
@@ -24,12 +37,15 @@ export const useAppStore = create<AppState>()(
     (set, get) => ({
       imageUri: null,
       isProcessing: false,
+      isOffline: false,
       result: null,
       error: null,
       history: [],
+      syncQueue: [],
 
       setImageUri: (uri) => set({ imageUri: uri, result: null, error: null }),
       setProcessing: (status) => set({ isProcessing: status }),
+      setIsOffline: (status) => set({ isOffline: status }),
       
       setResult: (data) => {
         set({ result: data, isProcessing: false, error: null });
@@ -48,13 +64,30 @@ export const useAppStore = create<AppState>()(
         });
       },
 
-      clearHistory: () => set({ history: [] })
+      clearHistory: () => set({ history: [] }),
+
+      enqueueSyncTask: (task) => {
+        set((state) => {
+          const newTask: SyncTask = {
+            ...task,
+            id: Date.now().toString() + Math.random().toString(36).substring(2, 7),
+            timestamp: new Date().toISOString()
+          };
+          return { syncQueue: [...state.syncQueue, newTask] };
+        });
+      },
+
+      dequeueSyncTask: (taskId) => {
+        set((state) => ({
+          syncQueue: state.syncQueue.filter(t => t.id !== taskId)
+        }));
+      }
     }),
     {
       name: 'easy-to-read-storage',
       storage: createJSONStorage(() => AsyncStorage),
-      // Only persist the history array, not the active session states
-      partialize: (state) => ({ history: state.history }),
+      // Only persist the history array and syncQueue, not the active session states
+      partialize: (state) => ({ history: state.history, syncQueue: state.syncQueue }),
     }
   )
 );

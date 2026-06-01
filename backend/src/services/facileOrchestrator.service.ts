@@ -137,6 +137,12 @@ export class FacileParallelOrchestrator {
         const original = rawText.substring(suggestion.startIndex, suggestion.endIndex);
         const replacementText = suggestion.possibleTransformations[0];
 
+        // Skip no-op "not-adapted" suggestions where FACILE returns identical text
+        if (original.trim() === replacementText.trim()) {
+          console.log(`[FACILE SKIP] Guideline ${suggestion.idGuideline}: no real transformation (not-adapted)`);
+          continue;
+        }
+
         replacements.push({
           startIndex: suggestion.startIndex,
           endIndex: suggestion.endIndex,
@@ -171,59 +177,19 @@ export class FacileParallelOrchestrator {
     };
   }
 
-  private async identify(text: string): Promise<FacileViolation[]> {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), IDENTIFY_TIMEOUT_MS);
-    const payload = this.buildPayload(text, this.targetGuidelines);
-
-    console.log(`[FACILE API] Outgoing IDENTIFY request to: ${this.identifyUrl}`);
-    console.log(`[FACILE API] IDENTIFY Payload:\n`, JSON.stringify(payload, null, 2));
-
-    try {
-      const response = await fetch(this.identifyUrl, {
-        method: 'POST',
-        headers: {
-          'Authorization': this.authHeader,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(payload),
-        signal: controller.signal
-      });
-
-      console.log(`[FACILE API] IDENTIFY Response Status: ${response.status}`);
-
-      if (!response.ok) {
-        throw new Error(`FACILE identify failed: ${response.status}`);
-      }
-
-      const data = await response.json();
-      console.log(`[FACILE API] IDENTIFY Response Data:\n`, JSON.stringify(data, null, 2));
-      return this.normalizeIdentifyResponse(data);
-    } catch (error) {
-      console.error(`[FACILE API] IDENTIFY request failed:`, error);
-      if ((error as Error).name === 'AbortError') {
-        throw new FacileTimeoutError('FACILE identify timed out');
-      }
-      throw error;
-    } finally {
-      clearTimeout(timeoutId);
-    }
-  }
-
-  private async suggest(
-    text: string,
-    violations: FacileViolation[]
-  ): Promise<PromiseSettledResult<FacileSuggestion[]>[]> {
-    const promises = violations.map(async (violation) => {
+  private async identify(text: string, retries = 3): Promise<FacileViolation[]> {
+    for (let attempt = 1; attempt <= retries; attempt++) {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), SUGGEST_TIMEOUT_MS);
-      const payload = this.buildPayload(text, [violation]);
+      const timeoutId = setTimeout(() => controller.abort(), IDENTIFY_TIMEOUT_MS);
+      const payload = this.buildPayload(text, this.targetGuidelines);
 
-      console.log(`[FACILE API] Outgoing SUGGEST request to: ${this.suggestUrl} for violation: ${violation.idGuideline}`);
-      console.log(`[FACILE API] SUGGEST Payload:\n`, JSON.stringify(payload, null, 2));
+      console.log(`[FACILE API] Outgoing IDENTIFY request (Attempt ${attempt}) to: ${this.identifyUrl}`);
+      if (attempt === 1) {
+        console.log(`[FACILE API] IDENTIFY Payload:\n`, JSON.stringify(payload, null, 2));
+      }
 
       try {
-        const response = await fetch(this.suggestUrl, {
+        const response = await fetch(this.identifyUrl, {
           method: 'POST',
           headers: {
             'Authorization': this.authHeader,
@@ -233,26 +199,83 @@ export class FacileParallelOrchestrator {
           signal: controller.signal
         });
 
-        console.log(`[FACILE API] SUGGEST Response Status: ${response.status} for violation: ${violation.idGuideline}`);
+        console.log(`[FACILE API] IDENTIFY Response Status: ${response.status}`);
 
         if (!response.ok) {
-          throw new Error(`FACILE suggest failed: ${response.status}`);
+          throw new Error(`FACILE identify failed: ${response.status}`);
         }
 
         const data = await response.json();
-        console.log(`[FACILE API] SUGGEST Response Data for violation ${violation.idGuideline}:\n`, JSON.stringify(data, null, 2));
-        return this.normalizeSuggestResponse(data);
+        console.log(`[FACILE API] IDENTIFY Response Data:\n`, JSON.stringify(data, null, 2));
+        return this.normalizeIdentifyResponse(data);
       } catch (error) {
-        console.error(`[FACILE API] SUGGEST request failed for violation ${violation.idGuideline}:`, error);
-        if ((error as Error).name === 'AbortError') {
-          throw new FacileTimeoutError(`FACILE suggest timed out for ${violation.idGuideline}`);
+        console.error(`[FACILE API] IDENTIFY request failed on attempt ${attempt}:`, error);
+        if (attempt === retries) {
+          if ((error as Error).name === 'AbortError') {
+            throw new FacileTimeoutError('FACILE identify timed out');
+          }
+          throw error;
         }
-        const err = new Error(`Suggest failed for ${violation.idGuideline}: ${(error as Error).message}`);
-        (err as { guideline?: string }).guideline = violation.idGuideline;
-        throw err;
+        await new Promise(resolve => setTimeout(resolve, 1000));
       } finally {
         clearTimeout(timeoutId);
       }
+    }
+    throw new Error('Unreachable');
+  }
+
+  private async suggest(
+    text: string,
+    violations: FacileViolation[],
+    retries = 3
+  ): Promise<PromiseSettledResult<FacileSuggestion[]>[]> {
+    const promises = violations.map(async (violation) => {
+      for (let attempt = 1; attempt <= retries; attempt++) {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), SUGGEST_TIMEOUT_MS);
+        const payload = this.buildPayload(text, [violation]);
+
+        console.log(`[FACILE API] Outgoing SUGGEST request (Attempt ${attempt}) to: ${this.suggestUrl} for violation: ${violation.idGuideline}`);
+        if (attempt === 1) {
+          console.log(`[FACILE API] SUGGEST Payload:\n`, JSON.stringify(payload, null, 2));
+        }
+
+        try {
+          const response = await fetch(this.suggestUrl, {
+            method: 'POST',
+            headers: {
+              'Authorization': this.authHeader,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload),
+            signal: controller.signal
+          });
+
+          console.log(`[FACILE API] SUGGEST Response Status: ${response.status} for violation: ${violation.idGuideline}`);
+
+          if (!response.ok) {
+            throw new Error(`FACILE suggest failed: ${response.status}`);
+          }
+
+          const data = await response.json();
+          console.log(`[FACILE API] SUGGEST Response Data for violation ${violation.idGuideline}:\n`, JSON.stringify(data, null, 2));
+          return this.normalizeSuggestResponse(data);
+        } catch (error) {
+          console.error(`[FACILE API] SUGGEST request failed for violation ${violation.idGuideline} on attempt ${attempt}:`, error);
+          if (attempt === retries) {
+            if ((error as Error).name === 'AbortError') {
+              throw new FacileTimeoutError(`FACILE suggest timed out for ${violation.idGuideline}`);
+            }
+            const err = new Error(`Suggest failed for ${violation.idGuideline}: ${(error as Error).message}`);
+            (err as { guideline?: string }).guideline = violation.idGuideline;
+            throw err;
+          }
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        } finally {
+          clearTimeout(timeoutId);
+        }
+      }
+      throw new Error('Unreachable');
     });
 
     return Promise.allSettled(promises);

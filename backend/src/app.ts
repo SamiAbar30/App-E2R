@@ -5,6 +5,8 @@ import { errorHandler } from './middleware/errorHandler';
 import { authMiddleware } from './middleware/auth.middleware';
 import { imageSizeMiddleware } from './middleware/imageSizeMiddleware';
 import { analyzeHandler } from './controllers/analyze.controller';
+import { submitRatingHandler } from './controllers/rating.controller';
+import { getStatsHandler, getRatingsHandler, getDictionaryHandler } from './controllers/admin.controller';
 import { env } from './config/env';
 
 /**
@@ -49,6 +51,17 @@ export function createApp(): express.Application {
     imageSizeMiddleware,
     analyzeHandler
   );
+
+  app.post(
+    '/api/v1/ratings',
+    authMiddleware,
+    submitRatingHandler
+  );
+
+  // ── Admin Routes ──────────────────────────────────────────────────
+  app.get('/api/v1/admin/stats', authMiddleware, getStatsHandler);
+  app.get('/api/v1/admin/ratings', authMiddleware, getRatingsHandler);
+  app.get('/api/v1/admin/dictionary', authMiddleware, getDictionaryHandler);
 
   // ── 6. 404 Handler ───────────────────────────────────────────────
   app.use((_req, res) => {

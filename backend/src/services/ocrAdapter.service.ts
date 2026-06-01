@@ -59,53 +59,122 @@ export class GcpVisionAdapter implements IOcrProvider {
 
   async extract(base64: string): Promise<OcrResult> {
     const raw = base64.includes(',') ? base64.split(',')[1] : base64;
-
-    // Run image preprocessing pipeline before sending to GCP Vision
     const rawBuffer = Buffer.from(raw, 'base64');
-    const processedBuffer = await OcrImagePreprocessor.processForOcr(rawBuffer);
-    const payload = processedBuffer.toString('base64');
 
-    return this.attemptRequest(payload, 0);
+    const variants = typeof (OcrImagePreprocessor as any).processForOcrVariants === 'function'
+      ? await OcrImagePreprocessor.processForOcrVariants(rawBuffer)
+      : [{
+          name: 'Preprocessed_Default',
+          buffer: await OcrImagePreprocessor.processForOcr(rawBuffer)
+        }];
+    const candidates = [
+      { name: 'Camera_Original', buffer: rawBuffer },
+      ...this.prioritizeVariants(variants)
+    ];
+
+    let bestResult: OcrResult | null = null;
+    let lastError: Error | null = null;
+
+    for (const candidate of candidates) {
+      try {
+        const result = await this.attemptRequest(candidate.buffer.toString('base64'), 0, candidate.name);
+        bestResult = this.pickBetterResult(bestResult, result);
+
+        if (this.isUsefulLabelText(result)) {
+          console.log(`[GCP Vision] Selected OCR candidate: ${candidate.name}`);
+          return result;
+        }
+      } catch (error) {
+        lastError = error as Error;
+        console.warn(`[GCP Vision] Candidate ${candidate.name} rejected: ${lastError.message}`);
+      }
+    }
+
+    if (bestResult) {
+      console.log('[GCP Vision] Returning best low-confidence OCR candidate after trying all variants.');
+      return bestResult;
+    }
+
+    throw new OcrUnavailableError(
+      `GCP Vision failed on all OCR candidates: ${lastError?.message || 'No text detected in image'}`
+    );
   }
 
-  private async attemptRequest(base64: string, attempt: number): Promise<OcrResult> {
+  private prioritizeVariants(variants: Array<{ name: string; buffer: Buffer; regionGroup?: string }>) {
+    const priority = (name: string, regionGroup?: string): number => {
+      if (name === 'Label_No_Barcode_Soft') return 1;
+      if (name === 'Gray_Soft_Contrast') return 2;
+      if (name === 'HighContrast_Glare_Soft') return 3;
+      if (name === 'Label_No_Barcode_Adaptive_Text') return 4;
+      if (name === 'Dark_Label_Adaptive_Text') return 5;
+      if (regionGroup) return 8;
+      return 6;
+    };
+
+    return [...variants].sort((a, b) => priority(a.name, a.regionGroup) - priority(b.name, b.regionGroup));
+  }
+
+  private pickBetterResult(current: OcrResult | null, candidate: OcrResult): OcrResult {
+    if (!current) return candidate;
+    return this.scoreOcrResult(candidate) > this.scoreOcrResult(current) ? candidate : current;
+  }
+
+  private scoreOcrResult(result: OcrResult): number {
+    const text = result.rawText;
+    const signalScore = /ingredientes?|al[eé]rgenos?|aditivos?|agua\s+mineral|composici[oó]n\s+anal[ií]tica|conservar|e-?\d{3}/i.test(text)
+      ? 250
+      : 0;
+    const barcodePenalty = /^\s*[\d\s|]{8,}\s*$/.test(text) ? 300 : 0;
+    return text.length + result.lines.length * 12 + result.confidence * 100 + signalScore - barcodePenalty;
+  }
+
+  private isUsefulLabelText(result: OcrResult): boolean {
+    const text = result.rawText;
+    if (/^\s*[\d\s|]{8,}\s*$/.test(text)) return false;
+    if (/ingredientes?|al[eé]rgenos?|aditivos?|agua\s+mineral|composici[oó]n\s+anal[ií]tica|conservar|e-?\d{3}/i.test(text)) {
+      return true;
+    }
+    return text.length >= 120 && result.lines.length >= 3;
+  }
+
+  private async attemptRequest(base64: string, attempt: number, candidateName: string): Promise<OcrResult> {
     try {
-      return await this.executeRequest(base64);
+      return await this.executeRequest(base64, candidateName);
     } catch (error) {
       const err = error as Error;
       const retryable = this.isRetryableError(err);
       if (!retryable || attempt >= MAX_RETRIES) {
-        console.error(`[GCP Vision Error] Failed to extract text:`, err.message);
+        console.error(`[GCP Vision Error] Failed to extract text from ${candidateName}:`, err.message);
         throw new OcrUnavailableError(
-          `GCP Vision failed after ${attempt + 1} attempts: ${err.message}`
+          `GCP Vision failed for ${candidateName} after ${attempt + 1} attempts: ${err.message}`
         );
       }
 
       const backoffMs = BACKOFF_MS[attempt];
       await new Promise(resolve => setTimeout(resolve, backoffMs));
-      return this.attemptRequest(base64, attempt + 1);
+      return this.attemptRequest(base64, attempt + 1, candidateName);
     }
   }
 
-  private async executeRequest(base64: string): Promise<OcrResult> {
+  private async executeRequest(base64: string, candidateName: string): Promise<OcrResult> {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
     try {
-      console.log(`[GCP Vision] Sending request to Google APIs...`);
+      console.log(`[GCP Vision] Sending request to Google APIs (${candidateName})...`);
       const response = await fetch(this.endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           requests: [{
             image: { content: base64 },
-            features: [{ type: 'TEXT_DETECTION', maxResults: 1 }]
+            features: [{ type: 'DOCUMENT_TEXT_DETECTION', maxResults: 1 }]
           }]
         }),
         signal: controller.signal
       });
 
-      console.log(`[GCP Vision] Received HTTP ${response.status} from Google APIs`);
+      console.log(`[GCP Vision] Received HTTP ${response.status} from Google APIs (${candidateName})`);
 
       if (response.status >= 500) {
         throw new Error(`GCP Vision returned ${response.status}`);

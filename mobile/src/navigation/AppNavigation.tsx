@@ -7,6 +7,8 @@ import { AnalysisResultScreen } from '../screens/AnalysisResultScreen';
 import { AccessibilitySettingsScreen } from '../screens/AccessibilitySettingsScreen';
 import { HistoryScreen } from '../screens/HistoryScreen';
 import { ScanGuidanceScreen } from '../screens/ScanGuidanceScreen';
+import { CaregiverAuthScreen } from '../screens/CaregiverAuthScreen';
+import { CaregiverDashboardScreen } from '../screens/CaregiverDashboardScreen';
 import { useContrastPalette, useFontFamily } from '../hooks/useAccessibilityEngine';
 
 export type RootStackParamList = {
@@ -16,6 +18,8 @@ export type RootStackParamList = {
   AccessibilitySettings: undefined;
   History: undefined;
   ScanGuidance: { cta?: 'scan' | 'back' } | undefined;
+  CaregiverAuth: undefined;
+  CaregiverDashboard: undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -41,6 +45,8 @@ export function AppNavigation() {
         <Stack.Screen name="AccessibilitySettings" component={AccessibilitySettingsScreen} options={{ headerShown: false }} />
         <Stack.Screen name="History" component={HistoryScreen} options={{ headerShown: false }} />
         <Stack.Screen name="ScanGuidance" component={ScanGuidanceScreen} options={{ headerShown: false }} />
+        <Stack.Screen name="CaregiverAuth" component={CaregiverAuthScreen} options={{ headerShown: false }} />
+        <Stack.Screen name="CaregiverDashboard" component={CaregiverDashboardScreen} options={{ headerShown: false }} />
       </Stack.Navigator>
     </NavigationContainer>
   );

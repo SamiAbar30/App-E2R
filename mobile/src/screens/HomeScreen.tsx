@@ -26,7 +26,7 @@ type RootStackParamList = {
 type NavigationProp = NativeStackNavigationProp<RootStackParamList, 'Home'>;
 
 export function HomeScreen({ navigation }: { navigation: NavigationProp }) {
-  const { history, setResult } = useAppStore();
+  const { history, setResult, isOffline } = useAppStore();
   const fontScale = useEffectiveFontScale();
   const { minTouchSize } = useInteractionAccessibility();
 
@@ -59,14 +59,15 @@ export function HomeScreen({ navigation }: { navigation: NavigationProp }) {
       </View>
 
       <TouchableOpacity
-        style={[styles.primaryButton, { minHeight: Math.max(66, minTouchSize) }]}
-        onPress={() => navigation.navigate('Camera')}
+        style={[styles.primaryButton, { minHeight: Math.max(66, minTouchSize) }, isOffline && { backgroundColor: appTheme.muted }]}
+        onPress={() => !isOffline && navigation.navigate('Camera')}
         accessibilityRole="button"
         accessibilityLabel="Escanear producto"
+        disabled={isOffline}
       >
         <Camera color="#ffffff" size={24} strokeWidth={2.5} />
         <Text style={[styles.primaryButtonText, { fontSize: 16 * Math.min(fontScale, 1.25) }]}>
-          ESCANEAR PRODUCTO
+          {isOffline ? 'ESCANEO DESHABILITADO' : 'ESCANEAR PRODUCTO'}
         </Text>
       </TouchableOpacity>
 
@@ -78,9 +79,10 @@ export function HomeScreen({ navigation }: { navigation: NavigationProp }) {
           <QuickAction
             icon={<ScanLine color={appTheme.primary} size={24} />}
             label="Escanear"
-            onPress={() => navigation.navigate('Camera')}
+            onPress={() => !isOffline && navigation.navigate('Camera')}
             minTouchSize={minTouchSize}
             fontScale={fontScale}
+            disabled={isOffline}
           />
           <QuickAction
             icon={<History color={appTheme.primary} size={24} />}
@@ -146,19 +148,22 @@ function QuickAction({
   onPress,
   minTouchSize,
   fontScale,
+  disabled,
 }: {
   icon: React.ReactNode;
   label: string;
   onPress: () => void;
   minTouchSize: number;
   fontScale: number;
+  disabled?: boolean;
 }) {
   return (
     <TouchableOpacity
-      style={[styles.quickCard, { minHeight: Math.max(100, minTouchSize) }]}
+      style={[styles.quickCard, { minHeight: Math.max(100, minTouchSize) }, disabled && { opacity: 0.5 }]}
       onPress={onPress}
       accessibilityRole="button"
       accessibilityLabel={label}
+      disabled={disabled}
     >
       <View style={styles.quickIcon}>{icon}</View>
       <Text style={[styles.quickLabel, { fontSize: 13 * Math.min(fontScale, 1.25) }]}>

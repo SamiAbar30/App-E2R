@@ -5,8 +5,10 @@ import { AlertTriangle, Beaker, CheckCircle2, Droplets, RotateCcw, ScanLine, Vol
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { AppShell, appTheme } from '../components/AppShell';
 import { AudioVisualSyncView } from '../components/AudioVisualSyncView';
+import { RatingWidget } from '../components/RatingWidget';
 import { useAppStore } from '../store/useAppStore';
 import { useAccessibilityOverrides, useEffectiveFontScale, useInteractionAccessibility } from '../hooks/useAccessibilityEngine';
+import { submitRating } from '../api/client';
 import type { AdditiveResult, AllergenResult, MineralResult } from '../types';
 
 type RootStackParamList = {
@@ -179,6 +181,17 @@ export function AnalysisResultScreen({ navigation }: { navigation: NavigationPro
           <Text style={styles.originalText}>{originalText}</Text>
         </Section>
       )}
+
+      <RatingWidget
+        scanId={(result as any).id || ''}
+        onSubmit={async ({ scanId, rating, feedback }) => {
+          try {
+            await submitRating(scanId, rating, feedback);
+          } catch (e) {
+            console.error('Failed to submit rating:', e);
+          }
+        }}
+      />
 
       <View style={styles.actionRow}>
         <TouchableOpacity

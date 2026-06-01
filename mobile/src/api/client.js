@@ -1,4 +1,5 @@
 import { Platform } from 'react-native';
+import { useAppStore } from '../store/useAppStore';
 
 const getApiUrl = () => {
   if (process.env.EXPO_PUBLIC_API_URL) {
@@ -143,3 +144,77 @@ export const uploadLabelImage = async (imageUri, imageBase64) => {
     throw error;
   }
 };
+
+export const submitRating = async (scanId, rating, feedback) => {
+  const state = useAppStore.getState();
+  if (state.isOffline) {
+    state.enqueueSyncTask({
+      type: 'RATING',
+      payload: { scanId, rating, feedback }
+    });
+    return { status: 'ok', data: { id: `queued-${Date.now()}` }, queued: true };
+  }
+
+  if (USE_MOCK_API) {
+    // Simulate network delay
+    await new Promise(resolve => setTimeout(resolve, 500));
+    return { status: 'ok', data: { id: `mock-${Date.now()}` } };
+  }
+
+  try {
+    const response = await fetch(`${API_URL}/v1/ratings`, {
+      method: 'POST',
+      body: JSON.stringify({ scanId, rating, feedback }),
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'Authorization': `Bearer ${process.env.EXPO_PUBLIC_DEV_JWT || ''}`
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error('No se pudo enviar el feedback.');
+    }
+
+    return await response.json();
+  } catch (error) {
+    throw error;
+  }
+};
+
+export const processSyncQueue = async () => {
+  const state = useAppStore.getState();
+  // Double check offline state directly from network to be safe, but state is usually enough.
+  if (state.isOffline || state.syncQueue.length === 0) return;
+
+  console.log(`Processing ${state.syncQueue.length} items from sync queue...`);
+
+  for (const task of state.syncQueue) {
+    if (task.type === 'RATING') {
+      try {
+        // Just call the original endpoint/mock logic directly
+        if (USE_MOCK_API) {
+          await new Promise(resolve => setTimeout(resolve, 300));
+        } else {
+          const response = await fetch(`${API_URL}/v1/ratings`, {
+            method: 'POST',
+            body: JSON.stringify(task.payload),
+            headers: {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json',
+              'Authorization': `Bearer ${process.env.EXPO_PUBLIC_DEV_JWT || ''}`
+            },
+          });
+          if (!response.ok) throw new Error('Failed to sync rating');
+        }
+        
+        // Remove from queue upon success
+        useAppStore.getState().dequeueSyncTask(task.id);
+        console.log(`Successfully synced task: ${task.id}`);
+      } catch (error) {
+        console.warn(`Failed to sync task: ${task.id}. Will retry later.`, error);
+      }
+    }
+  }
+};
+

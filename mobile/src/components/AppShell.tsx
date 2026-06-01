@@ -7,11 +7,11 @@ import {
   View,
 } from 'react-native';
 import {
-  Accessibility,
+  ArrowLeft,
   Bell,
   History,
   Home,
-  Menu,
+  User,
   ScanLine,
 } from 'lucide-react-native';
 import {
@@ -97,7 +97,7 @@ export function AppShell({
           accessibilityRole="button"
           accessibilityLabel="Inicio"
         >
-          <Menu color={appTheme.primary} size={26} strokeWidth={2.4} />
+          <ArrowLeft color={appTheme.primary} size={26} strokeWidth={2.4} />
         </TouchableOpacity>
 
         <Text
@@ -116,7 +116,7 @@ export function AppShell({
             accessibilityLabel="Ajustes de accesibilidad"
           >
             {activeTab === 'settings' ? (
-              <Accessibility color={appTheme.primaryStrong} size={25} strokeWidth={2.5} />
+              <User color={appTheme.primaryStrong} size={25} strokeWidth={2.5} />
             ) : (
               <Bell color={appTheme.primary} size={22} strokeWidth={2.4} />
             )}
@@ -152,7 +152,7 @@ export function AppShell({
           <BottomNavButton
             label="Ajustes"
             active={activeTab === 'settings'}
-            icon={<Accessibility color={activeTab === 'settings' ? appTheme.primary : '#414750'} size={22} />}
+            icon={<User color={activeTab === 'settings' ? appTheme.primary : '#414750'} size={22} />}
             onPress={onSettings}
           />
         </View>

@@ -31,7 +31,7 @@ type RootStackParamList = {
 type NavigationProp = NativeStackNavigationProp<RootStackParamList, 'Result'>;
 
 export function CameraScanScreen({ navigation }: { navigation: NavigationProp }) {
-  const { setImageUri, imageUri, setProcessing, setResult, setError, isProcessing } = useAppStore();
+  const { setImageUri, imageUri, setProcessing, setResult, setError, isProcessing, isOffline } = useAppStore();
   const [imageBase64, setImageBase64] = useState<string | null>(null);
   const [mockStats, setMockStats] = useState<FrameStats | undefined>(undefined);
   const [previewSize, setPreviewSize] = useState<Size | undefined>(undefined);
@@ -183,13 +183,13 @@ export function CameraScanScreen({ navigation }: { navigation: NavigationProp })
                 style={[
                   styles.button,
                   { backgroundColor: palette.accent, minHeight: minTouchSize },
-                  (isValidating || (imageQuality && !imageQuality.isAccepted)) && styles.buttonDisabled,
+                  (isValidating || isOffline || (imageQuality && !imageQuality.isAccepted)) && styles.buttonDisabled,
                 ]} 
                 onPress={analyzeImage}
-                disabled={isValidating || (imageQuality != null && !imageQuality.isAccepted)}
+                disabled={isValidating || isOffline || (imageQuality != null && !imageQuality.isAccepted)}
                 accessibilityRole="button"
                 accessibilityLabel="Analizar foto"
-                accessibilityState={{ disabled: isValidating || (imageQuality != null && !imageQuality.isAccepted) }}
+                accessibilityState={{ disabled: isValidating || isOffline || (imageQuality != null && !imageQuality.isAccepted) }}
               >
                 <Text style={{ color: palette.background, fontSize: 16 * fontScale, fontWeight: 'bold' }}>Analizar</Text>
               </TouchableOpacity>
@@ -220,21 +220,22 @@ export function CameraScanScreen({ navigation }: { navigation: NavigationProp })
 
           <View style={styles.bottomControls}>
             <TouchableOpacity
-              style={[styles.galleryButton, { minWidth: minTouchSize, minHeight: minTouchSize }]}
+              style={[styles.galleryButton, { minWidth: minTouchSize, minHeight: minTouchSize }, isOffline && { opacity: 0.5 }]}
               onPress={pickImage}
               accessibilityRole="button"
               accessibilityLabel="Elegir de galeria"
+              disabled={isOffline}
             >
               <ImageIcon color="#ffffff" size={28} strokeWidth={2.4} />
             </TouchableOpacity>
 
             <TouchableOpacity
-              style={[styles.shutterButton, { width: Math.max(72, minTouchSize + 24), height: Math.max(72, minTouchSize + 24) }]}
+              style={[styles.shutterButton, { width: Math.max(72, minTouchSize + 24), height: Math.max(72, minTouchSize + 24) }, isOffline && { opacity: 0.5 }]}
               onPress={takePhoto}
-              disabled={isCapturing}
+              disabled={isCapturing || isOffline}
               accessibilityRole="button"
               accessibilityLabel="Tomar foto"
-              accessibilityState={{ disabled: isCapturing }}
+              accessibilityState={{ disabled: isCapturing || isOffline }}
             >
               <View style={[styles.shutterInner, isCapturing && styles.shutterInnerBusy]}>
                 {isCapturing ? (

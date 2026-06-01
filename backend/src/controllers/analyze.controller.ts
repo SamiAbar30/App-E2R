@@ -28,6 +28,7 @@ import { ApiLog } from '../models/ApiLog';
 import { postProcessOcrResult } from '../services/ocrPostProcessor.service';
 import { assemble } from '../services/textAssembler';
 import { expandCognitiveAccessibility } from '../services/accessibilityExpander';
+import { applyUnePostProcessing } from '../services/unePostProcessor';
 const { preprocessOcrText } = require('../services/textSegmenter');
 
 interface ScanDocument {
@@ -184,65 +185,50 @@ export async function analyzeHandler(req: Request, res: Response, next: NextFunc
       console.log(`[Analyze API - ${scanId}] FACILE Success. Status: ${facileResult.status}. Found ${facileResult.violations.length} violations.`);
       state = 'ADAPTED';
     } catch (error) {
-      console.warn(`[Analyze API - ${scanId}] FACILE Failed or Timed Out. Falling back to un-adapted text.`, (error as Error).message);
-      // Graceful degradation for any FACILE error (503, timeout, etc.)
-      const [parsedData, additives] = await Promise.all([
-        parseIngredientText(cleanText),
-        additivesPromise
-      ]);
-      const textAllergens = detectAllergens(cleanText);
-      const parsedAllergens = detectAllergensFromIngredients(parsedData.ingredients);
-      const allAllergens = mergeUniqueAllergens(declaredAllergens, textAllergens, parsedAllergens);
+      console.warn(`[Analyze API - ${scanId}] FACILE Failed or Timed Out. Returning error to client.`, (error as Error).message);
+      
       const processingMs = Date.now() - startTime;
-      const graphicalElements = parsedData.graphicalElements;
-
-      const responseData = await assemble({
-        scanId,
-        originalText: rawText,
-        adaptedText: expandedText,
-        productType,
-        minerals,
-        additives,
-        allergens: allAllergens,
-        graphicalElements,
-        complexTermMappings: parsedData.complexTermMappings,
-        processingMs,
-        degraded: true
-      }) as AnalyzeResponseWithProductType;
-
-      const envelope: ApiEnvelope<AnalyzeResponseData> = {
-        status: 'partial',
-        data: responseData,
-        code: 'UPM_DEGRADED',
-        message: 'FACILE service error: returning un-adapted text'
+      const isTimeout = error instanceof FacileTimeoutError || (error as Error).name === 'AbortError' || (error as Error).message.includes('timeout');
+      
+      const envelope: ApiEnvelope<null> = {
+        status: 'error',
+        data: null,
+        code: isTimeout ? 'FACILE_TIMEOUT' : 'FACILE_UNAVAILABLE',
+        message: 'El servicio de Lectura Facil no esta disponible ahora. Intentalo mas tarde.'
       };
 
-      res.status(207).json(envelope);
-
-      const scanDocument: ScanDocument = {
-        userId,
-        deviceOS,
-        productType,
-        originalText: rawText,
-        adaptedText: expandedText,
-        minerals,
-        additives,
-        allergens: allAllergens,
-        graphicalElements,
-        complexTermMappings: parsedData.complexTermMappings,
-        processingMs,
-        facileStatus: 'failed'
-      };
-
-      void scanRepository.create(scanDocument).catch(err => {
-        console.error('[DB Save Error] UserScan:', err);
-      });
+      res.status(isTimeout ? 504 : 503).json(envelope);
 
       void ApiLog.create({
         endpoint: '/api/v1/ingredients/analyze',
         method: 'POST',
         userId,
-        statusCode: 207,
+        statusCode: isTimeout ? 504 : 503,
+        responseCode: envelope.code,
+        latencyMs: processingMs,
+        requestSize: imagePayload.length,
+        state: 'ADAPT_EXEC'
+      }).catch(err => console.error('[DB Save Error] ApiLog:', err));
+
+      return;
+    }
+
+    if (facileResult.status !== 'full') {
+      const processingMs = Date.now() - startTime;
+      const envelope: ApiEnvelope<null> = {
+        status: 'error',
+        data: null,
+        code: 'FACILE_UNAVAILABLE',
+        message: 'El servicio de Lectura Facil no esta disponible ahora. Intentalo mas tarde.'
+      };
+
+      res.status(503).json(envelope);
+
+      void ApiLog.create({
+        endpoint: '/api/v1/ingredients/analyze',
+        method: 'POST',
+        userId,
+        statusCode: 503,
         responseCode: envelope.code,
         latencyMs: processingMs,
         requestSize: imagePayload.length,
@@ -260,8 +246,14 @@ export async function analyzeHandler(req: Request, res: Response, next: NextFunc
     const parsedAllergens = detectAllergensFromIngredients(parsedData.ingredients);
     const allAllergens = mergeUniqueAllergens(declaredAllergens, textAllergens, parsedAllergens);
     const graphicalElements = parsedData.graphicalElements;
+    // Apply local UNE post-processing for rules FACILE couldn't transform
+    const uneResult = applyUnePostProcessing(facileResult.adaptedText);
+    facileResult.adaptedText = uneResult.text;
+    console.log(`[Analyze API - ${scanId}] UNE post-processor applied ${uneResult.mappings.length} local transformations.`);
+
     const allMappings = [
       ...facileResult.complexTermMappings,
+      ...uneResult.mappings,
       ...parsedData.complexTermMappings
     ];
 
@@ -287,9 +279,9 @@ export async function analyzeHandler(req: Request, res: Response, next: NextFunc
     }) as AnalyzeResponseWithProductType;
 
     const envelope: ApiEnvelope<AnalyzeResponseData> = {
-      status: facileResult.status === 'full' ? 'success' : 'partial',
+      status: 'success',
       data: responseData,
-      code: facileResult.status === 'full' ? 'SUCCESS' : 'UPM_DEGRADED'
+      code: 'SUCCESS'
     };
 
     res.status(200).json(envelope);

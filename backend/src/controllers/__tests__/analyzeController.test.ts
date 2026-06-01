@@ -121,7 +121,7 @@ describe('Analyze Controller (COMP-001 State Machine)', () => {
     expect(ApiLog.create).toHaveBeenCalled();
   });
 
-  it('should gracefully degrade on FACILE 503 error (NFR-REL-001)', async () => {
+  it('should return service unavailable when FACILE fails', async () => {
     // Simulate 503 from FACILE
     nock(`${env.FACILE_HOST}`)
       .post(`/${env.FACILE_IDENTIFY_PORT}/facileRest/identification`)
@@ -139,11 +139,11 @@ describe('Analyze Controller (COMP-001 State Machine)', () => {
       .set('Authorization', `Bearer ${validToken}`)
       .send(payload);
 
-    // Should return HTTP 207 for partial success
-    expect(res.status).toBe(207);
-    expect(res.body.status).toBe('partial');
-    expect(res.body.code).toBe('UPM_DEGRADED');
-    expect(res.body.data.adaptedText).toBeTruthy(); 
+    expect(res.status).toBe(503);
+    expect(res.body.status).toBe('error');
+    expect(res.body.code).toBe('FACILE_UNAVAILABLE');
+    expect(res.body.data).toBeNull();
+    expect(res.body.message).toContain('Lectura Facil');
   });
 
   it('should keep adaptedText unchanged when FACILE identifies no guideline violations', async () => {

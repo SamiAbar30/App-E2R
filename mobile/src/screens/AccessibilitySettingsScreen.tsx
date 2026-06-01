@@ -1,7 +1,7 @@
 import React from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { Accessibility, Check, Contrast, Eye, Hand, Lock, Type, ZoomIn } from 'lucide-react-native';
+import { Check, Contrast, Eye, Hand, Lock, Shield, Type, User, ZoomIn } from 'lucide-react-native';
 import { AppShell, appTheme } from '../components/AppShell';
 import {
   useAccessibilityOverrides,
@@ -103,7 +103,7 @@ export function AccessibilitySettingsScreen({ navigation }: { navigation: Naviga
         <TemplateCard
           title="Modo simple"
           subtitle="Solo lo esencial"
-          icon={<Accessibility color={appTheme.primary} size={24} />}
+          icon={<User color={appTheme.primary} size={24} />}
           selected={overrides.chunkedReading}
           onPress={() => selectTemplate('simple')}
           accessibilityLabel="Aplicar perfil cognitivo"
@@ -133,7 +133,7 @@ export function AccessibilitySettingsScreen({ navigation }: { navigation: Naviga
 
       <View style={styles.previewBox}>
         <Type color={appTheme.primary} size={22} />
-        <Text style={[styles.previewText, { fontSize: 18 * Math.min(fontScale, 1.35) }]}>
+        <Text style={[styles.previewText, { fontSize: 18 * fontScale }]}>
           Asi se vera el texto en los resultados.
         </Text>
       </View>
@@ -160,6 +160,22 @@ export function AccessibilitySettingsScreen({ navigation }: { navigation: Naviga
         <Text style={styles.languageText}>Espanol</Text>
         <Lock color={appTheme.muted} size={18} />
       </View>
+
+      <Text style={styles.sectionLabel}>PERFIL DE CUIDADOR</Text>
+      <TouchableOpacity
+        onPress={() => navigation.navigate('CaregiverAuth' as any)}
+        style={[styles.motorCard, { minHeight: minTouchSize + 28, marginBottom: 20 }]}
+        accessibilityRole="button"
+        accessibilityLabel="Acceder al perfil de cuidador"
+      >
+        <View style={styles.iconCircle}>
+          <Shield color={appTheme.primary} size={24} />
+        </View>
+        <View style={styles.motorText}>
+          <Text style={styles.templateTitle}>Cuidador</Text>
+          <Text style={styles.templateSubtitle}>Gestionar restricciones y seguridad</Text>
+        </View>
+      </TouchableOpacity>
 
       <View style={styles.currentCard}>
         <Text style={styles.currentTitle}>Configuracion actual</Text>
